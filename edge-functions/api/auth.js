@@ -21,7 +21,7 @@ export async function onRequest(context) {
   try {
     if (request.method === 'POST') {
       const body = await request.json();
-      const { token } = body;
+      const { token, newToken, managementToken } = body;
       const storedToken = await OPEN_KOUNTER.get('system:token');
       
       if (!storedToken) {
@@ -31,13 +31,44 @@ export async function onRequest(context) {
         });
       }
 
-      if (token === storedToken) {
+      let authorized = false;
+      let mgmtTokenKey = null;
+
+      // 验证旧 Token
+      if (token && token === storedToken) {
+        authorized = true;
+      }
+      // 验证 Management Token (Passkey)
+      else if (managementToken) {
+        mgmtTokenKey = `passkey:mgmt_token:${managementToken}`;
+        const mgmtDataStr = await OPEN_KOUNTER.get(mgmtTokenKey);
+        if (mgmtDataStr) {
+          authorized = true;
+          // 可选：验证是否过期，但 KV TTL 会自动处理过期
+        }
+      }
+
+      if (authorized) {
+        if (newToken) {
+          await OPEN_KOUNTER.put('system:token', newToken);
+          
+          // 如果使用了 managementToken，删除它以防止重放
+          if (mgmtTokenKey) {
+            await OPEN_KOUNTER.delete(mgmtTokenKey);
+          }
+
+          return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, message: 'Token updated' }), {
+            headers: getCorsHeaders(request),
+            status: 200
+          });
+        }
+
         return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: { authorized: true } }), {
           headers: getCorsHeaders(request),
           status: 200
         });
       } else {
-        return new Response(JSON.stringify({ code: RES_CODE.FAIL, message: 'Invalid token' }), {
+        return new Response(JSON.stringify({ code: RES_CODE.FAIL, message: 'Invalid token or unauthorized' }), {
           headers: getCorsHeaders(request),
           status: 200
         });

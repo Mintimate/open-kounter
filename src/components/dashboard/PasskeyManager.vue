@@ -8,6 +8,9 @@ const message = ref('')
 const hasPasskey = ref(false)
 const credentials = ref([])
 const username = ref('admin')
+const newToken = ref('')
+const oldToken = ref('')
+const authMethod = ref('passkey') // 'passkey' | 'token'
 
 // 检查是否已有 Passkey
 const checkPasskey = async () => {
@@ -24,9 +27,11 @@ const checkPasskey = async () => {
     if (data.code === 0 && data.data.length > 0) {
       hasPasskey.value = true
       credentials.value = data.data
+      authMethod.value = 'passkey'
     } else {
       hasPasskey.value = false
       credentials.value = []
+      authMethod.value = 'token'
     }
   } catch (e) {
     console.error('Check passkey error:', e)
@@ -113,6 +118,127 @@ const handleBindPasskey = async () => {
   }
 }
 
+// 通过 Passkey 或旧 Token 更新 Token
+const handleUpdateToken = async () => {
+  if (!newToken.value) return
+  
+  if (authMethod.value === 'passkey' && !hasPasskey.value) {
+    message.value = '请先绑定 Passkey'
+    return
+  }
+  
+  if (authMethod.value === 'token' && !oldToken.value) {
+    message.value = '请输入旧 Token'
+    return
+  }
+  
+  if (!confirm('确定要更新 Token 吗？更新后需要重新登录。')) return
+
+  loading.value = true
+  message.value = ''
+  
+  try {
+    let managementToken = null
+
+    if (authMethod.value === 'passkey') {
+      // 1. 获取认证选项
+      const optionsRes = await fetch('/api/passkey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generateAuthenticationOptions',
+          data: { username: username.value }
+        })
+      })
+      const optionsData = await optionsRes.json()
+      
+      if (optionsData.code !== 0) {
+        throw new Error(optionsData.message)
+      }
+      
+      const { options, challengeId } = optionsData.data
+      
+      // 2. 调用 WebAuthn API
+      const credential = await navigator.credentials.get({
+        publicKey: {
+          ...options,
+          challenge: base64URLDecode(options.challenge),
+          allowCredentials: options.allowCredentials.map(c => ({
+            ...c,
+            id: base64URLDecode(c.id)
+          }))
+        }
+      })
+      
+      // 3. 获取 Management Token
+      const tokenRes = await fetch('/api/passkey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generateManagementToken',
+          data: {
+            challengeId,
+            response: {
+              id: credential.id,
+              rawId: credential.id,
+              type: credential.type,
+              response: {
+                clientDataJSON: base64URLEncode(credential.response.clientDataJSON),
+                authenticatorData: base64URLEncode(credential.response.authenticatorData),
+                signature: base64URLEncode(credential.response.signature),
+                userHandle: credential.response.userHandle ? base64URLEncode(credential.response.userHandle) : null
+              }
+            }
+          }
+        })
+      })
+      
+      const tokenData = await tokenRes.json()
+      
+      if (tokenData.code !== 0) {
+        throw new Error(tokenData.message)
+      }
+      
+      managementToken = tokenData.data.managementToken
+    }
+    
+    // 4. 更新 Token
+    const updateBody = {
+      newToken: newToken.value
+    }
+    
+    if (authMethod.value === 'passkey') {
+      updateBody.managementToken = managementToken
+    } else {
+      updateBody.token = oldToken.value
+    }
+
+    const updateRes = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updateBody)
+    })
+    
+    const updateData = await updateRes.json()
+    
+    if (updateData.code === 0) {
+      message.value = 'Token 更新成功！即将重新加载...'
+      newToken.value = ''
+      oldToken.value = ''
+      setTimeout(() => {
+        window.location.reload()
+      }, 1500)
+    } else {
+      throw new Error(updateData.message)
+    }
+  } catch (e) {
+    console.error('Update token error:', e)
+    message.value = `更新失败: ${e.message}`
+  } finally {
+    loading.value = false
+  }
+}
+
 // Base64URL 编解码
 function base64URLEncode(buffer) {
   const bytes = new Uint8Array(buffer)
@@ -160,6 +286,48 @@ function base64URLDecode(base64url) {
         </svg>
         <span>{{ loading ? '处理中...' : (hasPasskey ? '重新绑定' : '绑定 Passkey') }}</span>
       </button>
+
+      <div v-if="hasPasskey" class="border-t border-dark-700 pt-2 mt-2">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs text-gray-500">更新 Token</p>
+          <div class="flex gap-2 text-xs" v-if="hasPasskey">
+            <button 
+              @click="authMethod = 'passkey'"
+              class="px-2 py-0.5 rounded transition-colors"
+              :class="authMethod === 'passkey' ? 'bg-primary-500/20 text-primary-400' : 'text-gray-500 hover:text-gray-300'"
+            >Passkey</button>
+            <button 
+              @click="authMethod = 'token'"
+              class="px-2 py-0.5 rounded transition-colors"
+              :class="authMethod === 'token' ? 'bg-primary-500/20 text-primary-400' : 'text-gray-500 hover:text-gray-300'"
+            >旧 Token</button>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <input 
+            v-if="authMethod === 'token'"
+            v-model="oldToken" 
+            type="password" 
+            placeholder="输入旧 Token"
+            class="w-full px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500 transition-colors placeholder-gray-600"
+          />
+          
+          <input 
+            v-model="newToken" 
+            type="password" 
+            placeholder="输入新 Token"
+            class="w-full px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500 transition-colors placeholder-gray-600"
+          />
+          <button
+            @click="handleUpdateToken"
+            :disabled="loading || !newToken || (authMethod === 'token' && !oldToken)"
+            class="w-full py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>{{ authMethod === 'passkey' ? '验证 Passkey 并更新' : '更新 Token' }}</span>
+          </button>
+        </div>
+      </div>
 
       <div 
         v-if="message" 
