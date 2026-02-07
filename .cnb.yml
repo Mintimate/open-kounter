@@ -1,0 +1,28 @@
+main:
+  push:
+    - name: "推送镜像"
+      imports:
+        - https://cnb.cool/Mintimate/secret/-/blob/main/SyncToGitHub.yml
+      stages:
+        - name: 自动同步代码
+          image: tencentcom/git-sync
+          settings:
+            target_url: https://github.com/Mintimate/open-kounter.git
+            auth_type: https
+            username: ${GIT_USERNAME}
+            password: ${GIT_ACCESS_TOKEN}
+            branch: main
+            force: true
+    - name: "构建产物"
+      imports:
+        - https://cnb.cool/Mintimate/secret/-/blob/main/EdgeOnePage.yaml
+      docker:        
+        image: node:22
+        volumes:
+          - /root/.npm:copy-on-write
+          - node_modules:copy-on-write
+      stages:
+        - name: "部署流程"
+          image: tencentcom/deploy-eopages:latest
+          script: 
+            - edgeone pages deploy -n open-kounter -t $EO_SECRET
