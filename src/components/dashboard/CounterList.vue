@@ -177,23 +177,23 @@ defineExpose({ loadCounters })
     </div>
 
     <div class="overflow-x-auto">
-      <table class="w-full text-left border-collapse">
+      <table class="w-full text-left border-collapse table-fixed">
         <thead>
           <tr class="bg-dark-900/50 border-b border-dark-700 text-xs uppercase text-gray-400">
             <th class="px-4 py-3 font-medium">Target Key</th>
-            <th class="px-4 py-3 font-medium">计数</th>
-            <th class="px-4 py-3 font-medium">创建时间</th>
-            <th class="px-4 py-3 font-medium">更新时间</th>
-            <th class="px-4 py-3 font-medium text-right">操作</th>
+            <th class="px-4 py-3 font-medium w-24">计数</th>
+            <th class="px-4 py-3 font-medium w-40">创建时间</th>
+            <th class="px-4 py-3 font-medium w-40">更新时间</th>
+            <th class="px-4 py-3 font-medium text-right w-32">操作</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-dark-700">
           <tr v-for="item in counters" :key="item.target" class="hover:bg-dark-700/30 transition-colors">
-            <td class="px-4 py-3 font-mono text-primary text-sm">{{ item.target }}</td>
-            <td class="px-4 py-3 font-bold text-green-400">{{ item.count }}</td>
-            <td class="px-4 py-3 text-xs text-gray-400">{{ formatDate(item.created_at) }}</td>
-            <td class="px-4 py-3 text-xs text-gray-400">{{ formatDate(item.updated_at) }}</td>
-            <td class="px-4 py-3 text-right space-x-2">
+            <td class="px-4 py-3 font-mono text-primary text-sm truncate" :title="item.target">{{ item.target }}</td>
+            <td class="px-4 py-3 font-bold text-green-400 truncate" :title="item.count">{{ item.count }}</td>
+            <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{{ formatDate(item.created_at) }}</td>
+            <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{{ formatDate(item.updated_at) }}</td>
+            <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
               <button 
                 @click="openEditModal(item)" 
                 class="text-xs text-blue-400 hover:text-blue-300 hover:underline disabled:opacity-50"
