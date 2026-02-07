@@ -74,62 +74,61 @@ const handleDelete = () => {
 </script>
 
 <template>
-  <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-6">
-    <h3 class="text-lg font-semibold text-white mb-1">管理单个计数器</h3>
-    <p class="text-sm text-gray-500 mb-6">查询、修改或删除指定 Key</p>
+  <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
+    <h3 class="text-base font-semibold text-white mb-1">管理单个计数器</h3>
+    <p class="text-xs text-gray-500 mb-3">查询、修改或删除指定 Key</p>
     
-    <div class="space-y-4">
+    <div class="space-y-2">
       <div>
-        <label class="block text-xs text-gray-400 mb-1.5">Target Key</label>
         <div class="flex gap-2">
           <input 
             v-model="target" 
-            placeholder="例如：site-pv" 
-            class="flex-1 px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
+            placeholder="Target Key" 
+            class="flex-1 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
           />
           <button 
             @click="handleGet" 
             :disabled="singleLoading" 
-            class="px-4 py-2 bg-primary hover:bg-primary-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+            class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
           >
             查询
           </button>
         </div>
       </div>
 
-      <div v-if="result || target" class="pt-4 border-t border-dark-700">
-        <label class="block text-xs text-gray-400 mb-1.5">当前数值</label>
+      <div v-if="result || target" class="pt-2 border-t border-dark-700">
         <div class="flex gap-2">
           <input 
             type="number" 
             v-model="value" 
-            class="flex-1 px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
+            placeholder="Value"
+            class="flex-1 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
           />
           <button 
             @click="handleSet" 
             :disabled="singleLoading" 
-            class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+            class="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
           >
             更新
           </button>
         </div>
       </div>
 
-      <div v-if="target" class="pt-4 border-t border-dark-700">
+      <div v-if="target" class="pt-2 border-t border-dark-700">
         <button 
           @click="handleDelete" 
           :disabled="singleLoading" 
-          class="w-full py-2 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-sm rounded-lg transition-colors disabled:opacity-50"
+          class="w-full py-1 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs rounded-lg transition-colors disabled:opacity-50"
         >
           删除此计数器
         </button>
       </div>
 
-      <div v-if="result" class="mt-4 p-3 bg-black rounded-lg border border-dark-700 overflow-x-auto">
+      <div v-if="result" class="mt-2 p-2 bg-black rounded-lg border border-dark-700 overflow-x-auto">
         <pre class="text-xs text-green-400 font-mono">{{ JSON.stringify(result, null, 2) }}</pre>
       </div>
 
-      <div v-if="singleError" class="text-xs text-red-400 mt-2">{{ singleError }}</div>
+      <div v-if="singleError" class="text-xs text-red-400 mt-1">{{ singleError }}</div>
     </div>
   </div>
 </template>
