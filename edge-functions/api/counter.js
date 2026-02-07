@@ -28,8 +28,17 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       }
-      const count = await getCount(target);
-      return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: { time: count, target } }), {
+      const data = await getCounterData(target);
+      const count = data ? data.time : 0;
+      return new Response(JSON.stringify({ 
+        code: RES_CODE.SUCCESS, 
+        data: { 
+          time: count, 
+          target,
+          created_at: data ? data.created_at : 0,
+          updated_at: data ? data.updated_at : 0
+        } 
+      }), {
         headers: getCorsHeaders(request)
       });
     } else if (request.method === 'POST') {
@@ -50,8 +59,17 @@ export async function onRequest(context) {
         await checkAuth(request);
         if (!target) throw new Error('Missing target');
         if (value === undefined) throw new Error('Missing value');
-        await OPEN_KOUNTER.put(`counter:${target}`, value.toString());
-        return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: { time: value, target } }), {
+        
+        const oldData = await getCounterData(target);
+        const now = Date.now();
+        const newData = {
+          time: parseInt(value),
+          created_at: (oldData && oldData.created_at) ? oldData.created_at : now,
+          updated_at: now
+        };
+
+        await OPEN_KOUNTER.put(`counter:${target}`, JSON.stringify(newData));
+        return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: { time: newData.time, target } }), {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'delete') {
@@ -77,8 +95,13 @@ export async function onRequest(context) {
         
         // Fetch counter values
         const items = await Promise.all(pageItems.map(async (target) => {
-          const count = await getCount(target);
-          return { target, count };
+          const data = await getCounterData(target);
+          return { 
+            target, 
+            count: data ? data.time : 0,
+            created_at: data ? data.created_at : 0,
+            updated_at: data ? data.updated_at : 0
+          };
         }));
         
         return new Response(JSON.stringify({ 
@@ -129,8 +152,8 @@ export async function onRequest(context) {
         const counters = {};
         // Fetch all counter values
         await Promise.all(index.map(async (target) => {
-          const count = await getCount(target);
-          counters[target] = count;
+          const data = await getCounterData(target);
+          counters[target] = data || { time: 0, created_at: 0, updated_at: 0 };
         }));
         
         return new Response(JSON.stringify({ 
@@ -166,9 +189,21 @@ export async function onRequest(context) {
         
         // 3. Import Counters
         const newIndex = [];
-        const importPromises = Object.entries(data.counters).map(async ([target, count]) => {
+        const importPromises = Object.entries(data.counters).map(async ([target, value]) => {
           newIndex.push(target);
-          await OPEN_KOUNTER.put(`counter:${target}`, count.toString());
+          let storeValue;
+          const now = Date.now();
+          
+          if (typeof value === 'object' && value !== null && 'time' in value) {
+             storeValue = JSON.stringify(value);
+          } else {
+             storeValue = JSON.stringify({
+               time: parseInt(value),
+               created_at: now,
+               updated_at: now
+             });
+          }
+          await OPEN_KOUNTER.put(`counter:${target}`, storeValue);
         });
         
         await Promise.all(importPromises);
@@ -253,17 +288,48 @@ async function checkAuth(request) {
   }
 }
 
-async function getCount(target) {
+async function getCounterData(target) {
   const val = await OPEN_KOUNTER.get(`counter:${target}`);
-  return parseInt(val || '0');
+  if (!val) return null;
+  try {
+    const data = JSON.parse(val);
+    if (typeof data === 'object' && data !== null && 'time' in data) {
+      return data;
+    }
+    return {
+      time: parseInt(val),
+      created_at: 0,
+      updated_at: 0
+    };
+  } catch (e) {
+    return {
+      time: parseInt(val || '0'),
+      created_at: 0,
+      updated_at: 0
+    };
+  }
+}
+
+async function getCount(target) {
+  const data = await getCounterData(target);
+  return data ? data.time : 0;
 }
 
 async function incrementCount(target) {
   const key = `counter:${target}`;
-  const val = await OPEN_KOUNTER.get(key);
-  const current = parseInt(val || '0');
+  const oldData = await getCounterData(target);
+  
+  const current = oldData ? oldData.time : 0;
   const next = current + 1;
-  await OPEN_KOUNTER.put(key, next.toString());
+  const now = Date.now();
+  
+  const newData = {
+    time: next,
+    created_at: (oldData && oldData.created_at) ? oldData.created_at : now,
+    updated_at: now
+  };
+  
+  await OPEN_KOUNTER.put(key, JSON.stringify(newData));
   
   // Add to index
   await addToIndex(target);

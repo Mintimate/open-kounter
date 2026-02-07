@@ -63,10 +63,38 @@ const handleFileChange = (event) => {
   reader.onload = (e) => {
     try {
       const json = JSON.parse(e.target.result)
-      if (!json.counters || !json.allowedDomains) {
-        throw new Error('无效的备份文件格式：缺少必要字段')
+      
+      // Check for LeanCloud format (Array)
+      if (Array.isArray(json)) {
+        const counters = {}
+        let validCount = 0
+        
+        json.forEach(item => {
+          if (item.target && typeof item.time === 'number') {
+            counters[item.target] = {
+              time: item.time,
+              created_at: item.createdAt ? new Date(item.createdAt).getTime() : Date.now(),
+              updated_at: item.updatedAt ? new Date(item.updatedAt).getTime() : Date.now()
+            }
+            validCount++
+          }
+        })
+        
+        if (validCount === 0) {
+          throw new Error('无法识别的 LeanCloud 导出格式：未找到有效的计数器数据')
+        }
+        
+        importData.value = {
+          counters,
+          allowedDomains: []
+        }
+      } else {
+        if (!json.counters || !json.allowedDomains) {
+          throw new Error('无效的备份文件格式：缺少必要字段')
+        }
+        importData.value = json
       }
-      importData.value = json
+      
       importConfirmText.value = ''
       showImportModal.value = true
     } catch (err) {
@@ -122,7 +150,7 @@ const executeImport = async () => {
 <template>
   <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
     <h3 class="text-base font-semibold text-white mb-1">数据备份</h3>
-    <p class="text-xs text-gray-500 mb-3">导出数据或从备份恢复</p>
+    <p class="text-xs text-gray-500 mb-3">导出数据或从备份恢复（支持 OpenKounter 备份及 LeanCloud 导出数据）</p>
     
     <div class="flex gap-2">
       <button 
