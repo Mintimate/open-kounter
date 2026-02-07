@@ -187,11 +187,11 @@ function base64URLDecode(base64url) {
         </div>
       </div>
 
-      <h2 class="text-3xl font-bold text-white tracking-tight mb-2">
-        {{ isInitialized ? '欢迎回来' : '系统初始化' }}
-      </h2>
-      <p class="text-gray-400">
-        {{ isInitialized ? '请使用管理员 Token 登录' : '初次使用请设置管理员 Token' }}
+      <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-purple-400 mb-2">
+        Open Kounter
+      </h1>
+      <p class="text-gray-400 mb-8">
+        开源的站点访问次数统计 <span class="mx-2 text-gray-600">|</span> {{ isInitialized ? '欢迎回来' : '系统初始化' }}
       </p>
     </div>
 
