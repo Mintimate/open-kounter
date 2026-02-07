@@ -120,22 +120,22 @@ const executeImport = async () => {
 </script>
 
 <template>
-  <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-6">
-    <h3 class="text-lg font-semibold text-white mb-1">数据备份与恢复</h3>
-    <p class="text-sm text-gray-500 mb-4">导出所有数据或从备份恢复</p>
+  <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
+    <h3 class="text-base font-semibold text-white mb-1">数据备份</h3>
+    <p class="text-xs text-gray-500 mb-3">导出数据或从备份恢复</p>
     
-    <div class="space-y-3">
+    <div class="flex gap-2">
       <button 
         @click="handleExport" 
-        class="w-full py-2 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2"
+        class="flex-1 py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
-        导出数据 (JSON)
+        导出
       </button>
       
-      <div class="relative">
+      <div class="relative flex-1">
         <input 
           type="file" 
           ref="fileInput" 
@@ -145,12 +145,12 @@ const executeImport = async () => {
         />
         <button 
           @click="triggerImport" 
-          class="w-full py-2 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2"
+          class="w-full py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
           </svg>
-          导入数据 (JSON)
+          导入
         </button>
       </div>
     </div>

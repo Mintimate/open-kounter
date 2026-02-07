@@ -7,6 +7,7 @@ const tokenInput = ref('')
 const isInitialized = ref(true)
 const loading = ref(false)
 const message = ref('')
+const username = ref('admin')
 
 const checkInitStatus = async () => {
   try {
@@ -74,6 +75,101 @@ const handleSubmit = async () => {
     loading.value = false
   }
 }
+
+// Passkey 登录
+const handlePasskeyLogin = async () => {
+  loading.value = true
+  message.value = ''
+
+  try {
+    // 1. 生成认证选项
+    const optionsRes = await fetch('/api/passkey', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'generateAuthenticationOptions',
+        data: { username: username.value }
+      })
+    })
+    const optionsData = await optionsRes.json()
+    
+    if (optionsData.code !== 0) {
+      throw new Error(optionsData.message)
+    }
+    
+    const { options, challengeId } = optionsData.data
+    
+    // 2. 调用 WebAuthn API
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        ...options,
+        challenge: base64URLDecode(options.challenge),
+        allowCredentials: options.allowCredentials.map(cred => ({
+          ...cred,
+          id: base64URLDecode(cred.id)
+        }))
+      }
+    })
+    
+    // 3. 验证认证
+    const verifyRes = await fetch('/api/passkey', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'verifyAuthentication',
+        data: {
+          challengeId,
+          response: {
+            id: credential.id,
+            rawId: credential.id,
+            type: credential.type,
+            response: {
+              clientDataJSON: base64URLEncode(credential.response.clientDataJSON),
+              authenticatorData: base64URLEncode(credential.response.authenticatorData),
+              signature: base64URLEncode(credential.response.signature),
+              userHandle: credential.response.userHandle ? base64URLEncode(credential.response.userHandle) : null
+            }
+          }
+        }
+      })
+    })
+    
+    const verifyData = await verifyRes.json()
+    
+    if (verifyData.code === 0) {
+      message.value = 'Passkey 登录成功！'
+      emit('login', verifyData.data.token)
+    } else {
+      throw new Error(verifyData.message)
+    }
+  } catch (e) {
+    console.error('Passkey login error:', e)
+    message.value = `Passkey 登录失败: ${e.message}`
+  } finally {
+    loading.value = false
+  }
+}
+
+// Base64URL 编解码
+function base64URLEncode(buffer) {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
+function base64URLDecode(base64url) {
+  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
+  const padding = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4))
+  const binary = atob(base64 + padding)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes
+}
 </script>
 
 <template>
@@ -129,9 +225,31 @@ const handleSubmit = async () => {
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
           </svg>
         </button>
+
+        <!-- Passkey 登录 -->
+        <div v-if="isInitialized" class="relative">
+          <div class="absolute inset-0 flex items-center">
+            <div class="w-full border-t border-dark-600"></div>
+          </div>
+          <div class="relative flex justify-center text-xs uppercase">
+            <span class="bg-dark-800 px-2 text-gray-500">或</span>
+          </div>
+        </div>
+
+        <button 
+          v-if="isInitialized"
+          @click="handlePasskeyLogin" 
+          :disabled="loading"
+          class="w-full py-3.5 bg-dark-700/50 hover:bg-dark-700 border border-dark-600 hover:border-green-500/50 text-white font-medium rounded-xl shadow-lg hover:shadow-green-500/20 transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+          </svg>
+          <span>使用 Passkey 登录</span>
+        </button>
         
         <div 
-          v-if="message" 
+          v-if="message"
           class="p-4 rounded-xl text-sm text-center flex items-center justify-center gap-2 animate-fade-in"
           :class="message.includes('成功') ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'"
         >

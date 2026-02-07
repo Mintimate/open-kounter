@@ -1,10 +1,11 @@
 <script setup>
 import { ref } from 'vue'
 import CounterList from './dashboard/CounterList.vue'
-import TotalStats from './dashboard/TotalStats.vue'
-import SingleCounterManager from './dashboard/SingleCounterManager.vue'
-import DomainConfig from './dashboard/DomainConfig.vue'
 import DataBackup from './dashboard/DataBackup.vue'
+import DomainConfig from './dashboard/DomainConfig.vue'
+import PasskeyManager from './dashboard/PasskeyManager.vue'
+import SingleCounterManager from './dashboard/SingleCounterManager.vue'
+import TotalStats from './dashboard/TotalStats.vue'
 
 defineProps(['token'])
 
@@ -23,36 +24,36 @@ const handleFullRefresh = () => {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- 左侧：列表 (2/3) -->
-      <div class="lg:col-span-2 space-y-6">
-        <CounterList 
-          ref="counterListRef" 
-          :token="token" 
-          @update:totalCount="totalCount = $event" 
-        />
-      </div>
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
+    <!-- 左侧：列表 (3/4) -->
+    <div class="lg:col-span-3">
+      <CounterList 
+        ref="counterListRef" 
+        :token="token" 
+        @update:totalCount="totalCount = $event" 
+      />
+    </div>
 
-      <!-- 右侧：工具栏 (1/3) -->
-      <div class="space-y-6">
-        <TotalStats :totalCount="totalCount" />
-        
-        <SingleCounterManager 
-          :token="token" 
-          @refresh="handleRefreshList" 
-        />
-        
-        <DomainConfig 
-          ref="domainConfigRef" 
-          :token="token" 
-        />
-        
-        <DataBackup 
-          :token="token" 
-          @refresh="handleFullRefresh" 
-        />
-      </div>
+    <!-- 右侧：工具栏 (1/4) -->
+    <div class="space-y-4">
+      <TotalStats :totalCount="totalCount" />
+      
+      <SingleCounterManager 
+        :token="token" 
+        @refresh="handleRefreshList" 
+      />
+
+      <PasskeyManager :token="token" />
+      
+      <DomainConfig 
+        ref="domainConfigRef" 
+        :token="token" 
+      />
+      
+      <DataBackup 
+        :token="token" 
+        @refresh="handleFullRefresh" 
+      />
     </div>
   </div>
 </template>
