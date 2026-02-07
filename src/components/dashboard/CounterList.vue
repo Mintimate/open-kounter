@@ -51,6 +51,11 @@ const loadCounters = async () => {
   }
 }
 
+const handlePageSizeChange = () => {
+  currentPage.value = 1
+  loadCounters()
+}
+
 const deleteCounter = async (targetKey) => {
   if (!confirm(`确定要删除 "${targetKey}" 的计数器吗？`)) return
   
@@ -146,13 +151,25 @@ defineExpose({ loadCounters })
   <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm overflow-hidden">
     <div class="p-4 border-b border-dark-700 flex justify-between items-center bg-dark-800/50">
       <h3 class="text-base font-semibold text-white">计数器列表</h3>
-      <button 
-        @click="loadCounters" 
-        :disabled="loading"
-        class="px-3 py-1.5 text-xs bg-dark-700 hover:bg-dark-600 text-gray-200 rounded-md transition-colors border border-dark-600"
-      >
-        {{ loading ? '加载中...' : '刷新' }}
-      </button>
+      <div class="flex items-center gap-2">
+        <select 
+          v-model="pageSize" 
+          @change="handlePageSizeChange"
+          class="px-2 py-1.5 text-xs bg-dark-700 text-gray-200 rounded-md border border-dark-600 focus:outline-none focus:border-primary cursor-pointer"
+        >
+          <option :value="10">10 条/页</option>
+          <option :value="20">20 条/页</option>
+          <option :value="50">50 条/页</option>
+          <option :value="100">100 条/页</option>
+        </select>
+        <button 
+          @click="loadCounters" 
+          :disabled="loading"
+          class="px-3 py-1.5 text-xs bg-dark-700 hover:bg-dark-600 text-gray-200 rounded-md transition-colors border border-dark-600"
+        >
+          {{ loading ? '加载中...' : '刷新' }}
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="m-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg text-xs">
