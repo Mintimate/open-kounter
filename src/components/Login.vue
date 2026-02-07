@@ -176,9 +176,17 @@ function base64URLDecode(base64url) {
   <div class="w-full max-w-md">
     <!-- Logo/Brand Section -->
     <div class="text-center mb-10">
-      <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-purple-600 shadow-lg shadow-primary/30 mb-6 transform hover:scale-105 transition-transform duration-300 overflow-hidden">
-        <img src="/favicon.png" alt="Logo" class="w-10 h-10 object-contain" />
+      <div class="relative inline-block group mb-6">
+        <!-- 灵动光晕特效 -->
+        <div class="absolute -inset-3 bg-gradient-to-r from-primary via-purple-500 to-blue-500 rounded-full blur-xl opacity-30 group-hover:opacity-60 transition duration-500 animate-gradient-xy"></div>
+        <div class="absolute -inset-1 bg-gradient-to-r from-primary/40 via-purple-400/40 to-blue-400/40 rounded-full blur-md opacity-0 group-hover:opacity-50 transition duration-500 animate-gradient-xy"></div>
+        
+        <!-- Logo 主体 (无边界) -->
+        <div class="relative inline-flex items-center justify-center w-24 h-24">
+          <img src="/favicon.png" alt="Logo" class="w-20 h-20 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 ease-out-back" />
+        </div>
       </div>
+
       <h2 class="text-3xl font-bold text-white tracking-tight mb-2">
         {{ isInitialized ? '欢迎回来' : '系统初始化' }}
       </h2>
@@ -280,5 +288,9 @@ function base64URLDecode(base64url) {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.ease-out-back {
+  transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 </style>
