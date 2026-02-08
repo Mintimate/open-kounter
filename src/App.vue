@@ -65,11 +65,11 @@ onMounted(async () => {
                 <img src="/favicon.png" alt="Logo" class="w-7 h-7 object-contain drop-shadow-lg transform group-hover:rotate-12 transition-transform duration-300" />
               </div>
             </div>
-            <div class="flex flex-col">
+            <div class="flex flex-col items-start">
               <h1 class="text-lg font-bold text-white tracking-tight leading-none group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-primary group-hover:to-purple-500 transition-all duration-300">
                 Open Kounter
               </h1>
-              <span class="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mt-1">开源的站点访问次数统计</span>
+              <span class="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mt-1">即刻 KV 计数，简单可视化</span>
             </div>
           </div>
           <button 

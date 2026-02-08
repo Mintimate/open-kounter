@@ -176,14 +176,16 @@ function base64URLDecode(base64url) {
   <div class="w-full max-w-md">
     <!-- Logo/Brand Section -->
     <div class="text-center mb-10">
-      <div class="relative inline-block group mb-6">
-        <!-- 灵动光晕特效 -->
-        <div class="absolute -inset-3 bg-gradient-to-r from-primary via-purple-500 to-blue-500 rounded-full blur-xl opacity-30 group-hover:opacity-60 transition duration-500 animate-gradient-xy"></div>
-        <div class="absolute -inset-1 bg-gradient-to-r from-primary/40 via-purple-400/40 to-blue-400/40 rounded-full blur-md opacity-0 group-hover:opacity-50 transition duration-500 animate-gradient-xy"></div>
+      <div class="relative inline-block group mb-6 logo-container">
+        <!-- 灵动光晕特效 (Safari compatible) -->
+        <div class="glow-wrapper">
+          <div class="glow-effect glow-outer"></div>
+          <div class="glow-effect glow-inner"></div>
+        </div>
         
         <!-- Logo 主体 (无边界) -->
-        <div class="relative inline-flex items-center justify-center w-24 h-24">
-          <img src="/favicon.png" alt="Logo" class="w-20 h-20 object-contain drop-shadow-2xl transform group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 ease-out-back" />
+        <div class="relative inline-flex items-center justify-center w-32 h-32">
+          <img src="/favicon.png" alt="Logo" class="w-28 h-28 object-contain drop-shadow-2xl transform-gpu group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 ease-out-back" />
         </div>
       </div>
 
@@ -191,7 +193,7 @@ function base64URLDecode(base64url) {
         Open Kounter
       </h1>
       <p class="text-gray-400 mb-8">
-        开源的站点访问次数统计 <span class="mx-2 text-gray-600">|</span> {{ isInitialized ? '欢迎回来' : '系统初始化' }}
+        即刻 KV 计数，简单可视化 <span class="mx-2 text-gray-600">|</span> {{ isInitialized ? '欢迎回来' : '系统初始化' }}
       </p>
     </div>
 
@@ -292,5 +294,56 @@ function base64URLDecode(base64url) {
 
 .ease-out-back {
   transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Safari compatible glow effect */
+.logo-container {
+  isolation: isolate;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.glow-wrapper {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  overflow: hidden;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.glow-effect {
+  position: absolute;
+  border-radius: 9999px;
+  transition: opacity 0.5s;
+  will-change: opacity;
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.glow-outer {
+  inset: -0.75rem;
+  background: linear-gradient(to right, var(--color-primary, #6366f1), rgb(168, 85, 247), rgb(59, 130, 246));
+  filter: blur(24px);
+  -webkit-filter: blur(24px);
+  opacity: 0.3;
+}
+
+.glow-inner {
+  inset: -0.25rem;
+  background: linear-gradient(to right, rgba(99, 102, 241, 0.4), rgba(168, 85, 247, 0.4), rgba(59, 130, 246, 0.4));
+  filter: blur(12px);
+  -webkit-filter: blur(12px);
+  opacity: 0;
+}
+
+.group:hover .glow-outer {
+  opacity: 0.6;
+}
+
+.group:hover .glow-inner {
+  opacity: 0.5;
 }
 </style>
