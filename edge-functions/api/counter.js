@@ -52,6 +52,7 @@ export async function onRequest(context) {
           throw new Error('Origin not allowed');
         }
         const newCount = await incrementCount(target);
+        await updateIndex(target);
         return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: { time: newCount, target } }), {
           headers: getCorsHeaders(request)
         });
@@ -69,7 +70,15 @@ export async function onRequest(context) {
         };
 
         await OPEN_KOUNTER.put(`counter:${target}`, JSON.stringify(newData));
-        return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: { time: newData.time, target } }), {
+        await updateIndex(target);
+        return new Response(JSON.stringify({ 
+          code: RES_CODE.SUCCESS, 
+          data: { 
+            time: newData.time, 
+            target,
+            updated_at: newData.updated_at
+          } 
+        }), {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'delete') {
@@ -89,11 +98,16 @@ export async function onRequest(context) {
         const index = indexData ? JSON.parse(indexData) : [];
         
         const total = index.length;
+        // Calculate reverse-order slice without copying/reversing the entire array
+        // Original index: oldest...newest, we want newest first
         const start = (page - 1) * pageSize;
-        const end = start + pageSize;
-        const pageItems = index.slice(start, end);
+        const end = Math.min(start + pageSize, total);
+        const pageItems = [];
+        for (let i = total - 1 - start; i >= Math.max(total - end, 0); i--) {
+          pageItems.push(index[i]);
+        }
         
-        // Fetch counter values
+        // Fetch counter values in parallel
         const items = await Promise.all(pageItems.map(async (target) => {
           const data = await getCounterData(target);
           return { 
@@ -140,21 +154,20 @@ export async function onRequest(context) {
       } else if (action === 'export_all') {
         await checkAuth(request);
         
-        // Get Config
-        const allowedDomainsData = await OPEN_KOUNTER.get('system:allowed_domains');
+        // Fetch config and index in parallel
+        const [allowedDomainsData, indexData] = await Promise.all([
+          OPEN_KOUNTER.get('system:allowed_domains'),
+          OPEN_KOUNTER.get('system:counter_index')
+        ]);
         const allowedDomains = allowedDomainsData ? JSON.parse(allowedDomainsData) : [];
-        
-        // Get All Counters
-        const indexKey = 'system:counter_index';
-        const indexData = await OPEN_KOUNTER.get(indexKey);
         const index = indexData ? JSON.parse(indexData) : [];
         
-        const counters = {};
-        // Fetch all counter values
-        await Promise.all(index.map(async (target) => {
+        // Fetch all counter values in parallel, build object directly
+        const counterEntries = await Promise.all(index.map(async (target) => {
           const data = await getCounterData(target);
-          counters[target] = data || { time: 0, created_at: 0, updated_at: 0 };
+          return [target, data || { time: 0, created_at: 0, updated_at: 0 }];
         }));
+        const counters = Object.fromEntries(counterEntries);
         
         return new Response(JSON.stringify({ 
           code: RES_CODE.SUCCESS, 
@@ -187,24 +200,39 @@ export async function onRequest(context) {
           await OPEN_KOUNTER.put('system:allowed_domains', JSON.stringify(data.allowedDomains));
         }
         
-        // 3. Import Counters
-        const newIndex = [];
-        const importPromises = Object.entries(data.counters).map(async ([target, value]) => {
-          newIndex.push(target);
-          let storeValue;
-          const now = Date.now();
-          
-          if (typeof value === 'object' && value !== null && 'time' in value) {
-             storeValue = JSON.stringify(value);
-          } else {
-             storeValue = JSON.stringify({
-               time: parseInt(value),
-               created_at: now,
-               updated_at: now
-             });
-          }
-          await OPEN_KOUNTER.put(`counter:${target}`, storeValue);
+        // 3. Import Counters — single pass: sort, build index, and write KV
+        const entries = Object.entries(data.counters);
+        
+        // Sort entries by updated_at (ascending) so that newest are at the end of the index
+        entries.sort((a, b) => {
+          const timeA = (typeof a[1] === 'object' && a[1] !== null) ? (a[1].updated_at || 0) : 0;
+          const timeB = (typeof b[1] === 'object' && b[1] !== null) ? (b[1].updated_at || 0) : 0;
+          return timeA - timeB;
         });
+
+        // Single pass: build index + write all counters in parallel
+        const now = Date.now();
+        const newIndex = new Array(entries.length);
+        const importPromises = new Array(entries.length);
+        
+        for (let i = 0; i < entries.length; i++) {
+          const [target, value] = entries[i];
+          newIndex[i] = target;
+          
+          let storeValue;
+          if (typeof value === 'object' && value !== null && 'time' in value) {
+            if (!value.updated_at) value.updated_at = now;
+            if (!value.created_at) value.created_at = now;
+            storeValue = JSON.stringify(value);
+          } else {
+            storeValue = JSON.stringify({
+              time: parseInt(value),
+              created_at: now,
+              updated_at: now
+            });
+          }
+          importPromises[i] = OPEN_KOUNTER.put(`counter:${target}`, storeValue);
+        }
         
         await Promise.all(importPromises);
         
@@ -213,7 +241,7 @@ export async function onRequest(context) {
         
         return new Response(JSON.stringify({ 
           code: RES_CODE.SUCCESS, 
-          data: { imported: newIndex.length } 
+          data: { imported: entries.length } 
         }), {
           headers: getCorsHeaders(request)
         });
@@ -223,15 +251,11 @@ export async function onRequest(context) {
         if (!await checkOriginAllowed(request)) {
           throw new Error('Origin not allowed');
         }
+        
+        // Single pass: increment counters and collect targets
         const results = await Promise.all(requests.map(async (req) => {
-           // Support LeanCloud style requests or simple objects
-           // LeanCloud: { method: 'PUT', path: ..., body: { ... } }
-           // Simplified: { target: '...' }
            let t = req.target;
-           // Try to parse target from LeanCloud path if present
            if (!t && req.path) {
-             // path: /1.1/classes/Counter/site-pv -> extract site-pv? 
-             // Actually LeanCloud uses objectId. In our case objectId IS the target key.
              const match = req.path.match(/\/classes\/Counter\/(.+)$/);
              if (match) t = match[1];
            }
@@ -242,6 +266,21 @@ export async function onRequest(context) {
            }
            return null;
         }));
+        
+        // Collect unique non-null targets from results directly (no separate array)
+        const targetsToUpdate = [];
+        const seen = new Set();
+        for (let i = 0; i < results.length; i++) {
+          if (results[i] && !seen.has(results[i].target)) {
+            seen.add(results[i].target);
+            targetsToUpdate.push(results[i].target);
+          }
+        }
+        
+        if (targetsToUpdate.length > 0) {
+          await updateIndexBatch(targetsToUpdate);
+        }
+        
         return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, data: results }), {
           headers: getCorsHeaders(request)
         });
@@ -274,8 +313,6 @@ async function checkAuth(request) {
   // Check against KV stored token
   const storedToken = await OPEN_KOUNTER.get('system:token');
   
-  // Fallback to env var if KV not set (migration path) or if user prefers env var
-  // But requirement says "First login sets a token", so KV is primary.
   if (!storedToken) {
       if (typeof ADMIN_TOKEN !== 'undefined' && token === ADMIN_TOKEN) {
           return;
@@ -296,17 +333,10 @@ async function getCounterData(target) {
     if (typeof data === 'object' && data !== null && 'time' in data) {
       return data;
     }
-    return {
-      time: parseInt(val),
-      created_at: 0,
-      updated_at: 0
-    };
-  } catch (e) {
-    return {
-      time: parseInt(val || '0'),
-      created_at: 0,
-      updated_at: 0
-    };
+    // Legacy: plain number stored as string
+    return { time: parseInt(val), created_at: 0, updated_at: 0 };
+  } catch {
+    return { time: parseInt(val || '0'), created_at: 0, updated_at: 0 };
   }
 }
 
@@ -331,21 +361,37 @@ async function incrementCount(target) {
   
   await OPEN_KOUNTER.put(key, JSON.stringify(newData));
   
-  // Add to index
-  await addToIndex(target);
-  
   return next;
 }
 
-async function addToIndex(target) {
+async function updateIndex(target) {
   const indexKey = 'system:counter_index';
   const indexData = await OPEN_KOUNTER.get(indexKey);
   let index = indexData ? JSON.parse(indexData) : [];
   
-  if (!index.includes(target)) {
-    index.push(target);
-    await OPEN_KOUNTER.put(indexKey, JSON.stringify(index));
+  const idx = index.indexOf(target);
+  if (idx > -1) {
+    index.splice(idx, 1);
   }
+  index.push(target);
+  
+  await OPEN_KOUNTER.put(indexKey, JSON.stringify(index));
+}
+
+async function updateIndexBatch(targets) {
+  if (!targets || targets.length === 0) return;
+  const indexKey = 'system:counter_index';
+  const indexData = await OPEN_KOUNTER.get(indexKey);
+  let index = indexData ? JSON.parse(indexData) : [];
+  
+  // Use Set for O(1) lookup instead of O(n) array filtering per target
+  const targetsSet = new Set(targets);
+  index = index.filter(t => !targetsSet.has(t));
+  
+  // targets are already deduplicated by caller
+  index.push(...targets);
+  
+  await OPEN_KOUNTER.put(indexKey, JSON.stringify(index));
 }
 
 async function removeFromIndex(target) {
@@ -369,16 +415,15 @@ async function checkOriginAllowed(request) {
   if (allowedDomains.length === 0) return true; // Empty list means allow all
   
   // Check if origin matches any allowed domain
-  return allowedDomains.some(domain => {
-    if (domain === '*') return true;
-    if (origin === domain) return true;
+  for (let i = 0; i < allowedDomains.length; i++) {
+    const domain = allowedDomains[i];
+    if (domain === '*' || origin === domain) return true;
     // Support wildcard subdomain: *.example.com
-    if (domain.startsWith('*.')) {
-      const baseDomain = domain.slice(2);
-      return origin.endsWith(baseDomain);
+    if (domain.charCodeAt(0) === 42 && domain.charCodeAt(1) === 46) { // '*.'
+      if (origin.endsWith(domain.slice(2))) return true;
     }
-    return false;
-  });
+  }
+  return false;
 }
 
 function getCorsHeaders(request) {
