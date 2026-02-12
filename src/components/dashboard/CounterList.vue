@@ -148,7 +148,13 @@ defineExpose({ loadCounters })
 </script>
 
 <template>
-  <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm overflow-hidden">
+  <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm overflow-hidden relative">
+    <Transition name="fade">
+      <div v-if="loading" class="absolute inset-0 bg-dark-900/50 z-10 flex items-center justify-center backdrop-blur-[1px]">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    </Transition>
+
     <div class="p-4 border-b border-dark-700 flex justify-between items-center bg-dark-800/50">
       <h3 class="text-base font-semibold text-white">计数器列表</h3>
       <div class="flex items-center gap-2">
@@ -187,29 +193,29 @@ defineExpose({ loadCounters })
             <th class="px-4 py-3 font-medium text-right w-32">操作</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-dark-700">
-          <tr v-for="item in counters" :key="item.target" class="hover:bg-dark-700/30 transition-colors">
-            <td class="px-4 py-3 font-mono text-primary text-sm truncate" :title="item.target">{{ item.target }}</td>
-            <td class="px-4 py-3 font-bold text-green-400 truncate" :title="item.count">{{ item.count }}</td>
-            <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{{ formatDate(item.created_at) }}</td>
-            <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{{ formatDate(item.updated_at) }}</td>
-            <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
-              <button 
-                @click="openEditModal(item)" 
-                class="text-xs text-blue-400 hover:text-blue-300 hover:underline disabled:opacity-50"
-                :disabled="loading"
-              >
-                编辑
-              </button>
-              <button 
-                @click="deleteCounter(item.target)" 
-                class="text-xs text-red-400 hover:text-red-300 hover:underline disabled:opacity-50"
-                :disabled="loading"
-              >
-                删除
-              </button>
-            </td>
-          </tr>
+        <tbody class="divide-y divide-dark-700 relative transition-opacity duration-300" :class="{ 'opacity-50': loading }">
+            <tr v-for="item in counters" :key="item.target" class="hover:bg-dark-700/30 transition-colors">
+              <td class="px-4 py-3 font-mono text-primary text-sm truncate" :title="item.target">{{ item.target }}</td>
+              <td class="px-4 py-3 font-bold text-green-400 truncate" :title="item.count">{{ item.count }}</td>
+              <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{{ formatDate(item.created_at) }}</td>
+              <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{{ formatDate(item.updated_at) }}</td>
+              <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                <button 
+                  @click="openEditModal(item)" 
+                  class="text-xs text-blue-400 hover:text-blue-300 hover:underline disabled:opacity-50"
+                  :disabled="loading"
+                >
+                  编辑
+                </button>
+                <button 
+                  @click="deleteCounter(item.target)" 
+                  class="text-xs text-red-400 hover:text-red-300 hover:underline disabled:opacity-50"
+                  :disabled="loading"
+                >
+                  删除
+                </button>
+              </td>
+            </tr>
           <tr v-if="counters.length === 0 && !loading">
             <td colspan="5" class="px-4 py-8 text-center text-gray-500 text-xs">
               暂无数据。计数器将在第一次调用 increment 时自动创建。
@@ -284,3 +290,15 @@ defineExpose({ loadCounters })
     </div>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>

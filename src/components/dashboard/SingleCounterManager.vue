@@ -5,7 +5,7 @@ const props = defineProps(['token'])
 const emit = defineEmits(['refresh'])
 
 const target = ref('')
-const value = ref(0)
+const value = ref('')
 const result = ref(null)
 const singleError = ref('')
 const singleLoading = ref(false)
@@ -45,7 +45,9 @@ const callApi = async (action, payload = {}) => {
         value.value = data.data.time
       }
       // Refresh list if needed
-      emit('refresh')
+      if (action !== 'get') {
+        emit('refresh')
+      }
     } else {
       singleError.value = data.message
     }
@@ -63,6 +65,10 @@ const handleGet = () => {
 
 const handleSet = () => {
   if (!target.value) return
+  if (value.value === '' || value.value === null) {
+    singleError.value = '请输入有效的数值'
+    return
+  }
   callApi('set', { value: parseInt(value.value) })
 }
 
