@@ -124,8 +124,11 @@ const handleDelete = () => {
         </button>
       </div>
 
-      <div v-if="result" class="mt-2 p-2 bg-black rounded-lg border border-dark-700 overflow-x-auto">
-        <pre class="text-xs text-green-400 font-mono">{{ JSON.stringify(result, null, 2) }}</pre>
+      <div v-if="result" class="mt-2 bg-black rounded-lg border border-dark-700 overflow-hidden text-left">
+        <div v-for="(val, key) in result" :key="key" class="flex px-3 py-2 border-b border-dark-800 last:border-0">
+          <span class="text-xs text-gray-500 w-24 shrink-0 font-medium truncate" :title="key">{{ key }}</span>
+          <span class="text-xs text-green-400 font-mono break-all">{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>
+        </div>
       </div>
 
       <div v-if="singleError" class="text-xs text-red-400 mt-1">{{ singleError }}</div>
