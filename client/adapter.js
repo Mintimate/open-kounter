@@ -1,32 +1,41 @@
 /* global CONFIG, Fluid */
-// eslint-disable-next-line no-console
 
 (function(window, document) {
-  // Configuration for EdgeOne
-  // You need to add 'edgeone' config in your Hexo _config.yml or theme config
-  // web_analytics:
-  //   edgeone:
-  //     server_url: "https://your-function-domain.edgeone.pages.dev"
+  'use strict';
   
-  const API_SERVER = (CONFIG.web_analytics.edgeone && CONFIG.web_analytics.edgeone.server_url) || ''; 
+  // Get server URL from config
+  const API_SERVER = (CONFIG.web_analytics.openkounter && CONFIG.web_analytics.openkounter.server_url) || '';
+  
+  if (!API_SERVER) {
+    console.warn('OpenKounter: server_url is not configured');
+    return;
+  }
 
   function getRecord(target) {
     return fetch(`${API_SERVER}/api/counter?target=${encodeURIComponent(target)}`)
-      .then(resp => resp.json())
+      .then(resp => {
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        return resp.json();
+      })
       .then(({ data, code, message }) => {
         if (code !== 0) {
-          throw new Error(message);
+          throw new Error(message || 'Unknown error');
         }
-        // Adapt to expected format: { time: number, objectId: target }
-        return { time: data.time, objectId: data.target };
+        return { time: data.time || 0, objectId: data.target };
       })
       .catch(error => {
-        console.error('Counter Error: ', error);
-        throw error;
+        console.error('OpenKounter fetch error:', error);
+        return { time: 0, objectId: target };
       });
   }
 
   function increment(incrArr) {
+    if (!incrArr || incrArr.length === 0) {
+      return Promise.resolve([]);
+    }
+    
     return fetch(`${API_SERVER}/api/counter`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -34,59 +43,75 @@
         action: 'batch_inc',
         requests: incrArr
       })
-    }).then(res => res.json())
+    })
       .then(res => {
-        if (res.code !== 0) throw new Error(res.message);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        return res.json();
+      })
+      .then(res => {
+        if (res.code !== 0) {
+          throw new Error(res.message || 'Failed to increment counter');
+        }
         return res.data;
       })
       .catch(error => {
-        console.error('Failed to save visitor count: ', error);
-        throw error;
+        console.error('OpenKounter increment error:', error);
       });
   }
 
   function buildIncrement(objectId) {
-    // We just need the target (which is the objectId in our system)
     return { target: objectId };
   }
 
-  // 校验是否为有效的 Host
+  // 校验是否为有效的主机（排除本地开发环境）
   function validHost() {
-    // Reuse leancloud ignore_local config if available, or default to true
-    if (CONFIG.web_analytics.leancloud && CONFIG.web_analytics.leancloud.ignore_local) {
-      var hostname = window.location.hostname;
-      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    const ignoreLocal = CONFIG.web_analytics.openkounter && CONFIG.web_analytics.openkounter.ignore_local;
+    if (ignoreLocal !== false) {
+      const hostname = window.location.hostname;
+      if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') {
         return false;
       }
     }
     return true;
   }
 
-  // 校验是否为有效的 UV
+  // 校验是否为有效的独立访客（24小时内只计一次）
   function validUV() {
-    var key = 'EdgeOne_UV_Flag';
-    var flag = localStorage.getItem(key);
-    if (flag) {
-      // 距离标记小于 24 小时则不计为 UV
-      if (new Date().getTime() - parseInt(flag, 10) <= 86400000) {
-        return false;
+    const key = 'OpenKounter_UV_Flag';
+    const now = Date.now();
+    
+    try {
+      const flag = localStorage.getItem(key);
+      if (flag) {
+        const lastVisit = parseInt(flag, 10);
+        // 距离上次访问小于 24 小时则不计为新 UV
+        if (now - lastVisit <= 86400000) {
+          return false;
+        }
       }
+      localStorage.setItem(key, now.toString());
+    } catch (e) {
+      // localStorage 不可用时默认计为 UV
+      console.warn('OpenKounter: localStorage is not available');
     }
-    localStorage.setItem(key, new Date().getTime().toString());
     return true;
   }
 
   function addCount() {
-    var enableIncr = CONFIG.web_analytics.enable && (!window.Fluid || !Fluid.ctx.dnt) && validHost();
-    var getterArr = [];
-    var incrArr = [];
+    const enableIncr = CONFIG.web_analytics.enable && (!window.Fluid || !Fluid.ctx.dnt) && validHost();
+    const getterArr = [];
+    const incrArr = [];
 
-    // 请求 PV 并自增
-    var pvCtn = document.querySelector('#leancloud-site-pv-container');
+    // 请求站点 PV 并自增
+    const pvCtn = document.querySelector('#openkounter-site-pv-container');
     if (pvCtn) {
-      var pvGetter = getRecord('site-pv').then((record) => {
-        enableIncr && incrArr.push(buildIncrement(record.objectId));
-        var ele = document.querySelector('#leancloud-site-pv');
+      const pvGetter = getRecord('site-pv').then((record) => {
+        if (enableIncr) {
+          incrArr.push(buildIncrement(record.objectId));
+        }
+        const ele = document.querySelector('#openkounter-site-pv');
         if (ele) {
           ele.innerText = (record.time || 0) + (enableIncr ? 1 : 0);
           pvCtn.style.display = 'inline';
@@ -95,13 +120,15 @@
       getterArr.push(pvGetter);
     }
 
-    // 请求 UV 并自增
-    var uvCtn = document.querySelector('#leancloud-site-uv-container');
+    // 请求站点 UV 并自增
+    const uvCtn = document.querySelector('#openkounter-site-uv-container');
     if (uvCtn) {
-      var uvGetter = getRecord('site-uv').then((record) => {
-        var incrUV = validUV() && enableIncr;
-        incrUV && incrArr.push(buildIncrement(record.objectId));
-        var ele = document.querySelector('#leancloud-site-uv');
+      const uvGetter = getRecord('site-uv').then((record) => {
+        const incrUV = validUV() && enableIncr;
+        if (incrUV) {
+          incrArr.push(buildIncrement(record.objectId));
+        }
+        const ele = document.querySelector('#openkounter-site-uv');
         if (ele) {
           ele.innerText = (record.time || 0) + (incrUV ? 1 : 0);
           uvCtn.style.display = 'inline';
@@ -110,15 +137,18 @@
       getterArr.push(uvGetter);
     }
 
-    // 如果有页面浏览数节点，则请求浏览数并自增
-    var viewCtn = document.querySelector('#leancloud-page-views-container');
+    // 请求页面浏览数并自增
+    const viewCtn = document.querySelector('#openkounter-page-views-container');
     if (viewCtn) {
-      var pathConfig = (CONFIG.web_analytics.leancloud && CONFIG.web_analytics.leancloud.path) || 'window.location.pathname';
-      var path = eval(pathConfig);
-      var target = decodeURI(path.replace(/\/*(index.html)?$/, '/'));
-      var viewGetter = getRecord(target).then((record) => {
-        enableIncr && incrArr.push(buildIncrement(record.objectId));
-        var ele = document.querySelector('#leancloud-page-views');
+      const pathConfig = CONFIG.web_analytics.openkounter.path || 'window.location.pathname';
+      const path = eval(pathConfig);
+      const target = decodeURI(path.replace(/\/*(index.html)?$/, '/'));
+      
+      const viewGetter = getRecord(target).then((record) => {
+        if (enableIncr) {
+          incrArr.push(buildIncrement(record.objectId));
+        }
+        const ele = document.querySelector('#openkounter-page-views');
         if (ele) {
           ele.innerText = (record.time || 0) + (enableIncr ? 1 : 0);
           viewCtn.style.display = 'inline';
@@ -127,12 +157,14 @@
       getterArr.push(viewGetter);
     }
 
-    // 如果启动计数自增，批量发起自增请求
-    if (enableIncr) {
-      Promise.all(getterArr).then(() => {
-        incrArr.length > 0 && increment(incrArr);
-      });
-    }
+    // 批量发起统计请求
+    Promise.all(getterArr).then(() => {
+      if (enableIncr && incrArr.length > 0) {
+        increment(incrArr);
+      }
+    }).catch(error => {
+      console.error('OpenKounter error:', error);
+    });
   }
 
   addCount();
