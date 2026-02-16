@@ -1,7 +1,7 @@
 const RES_CODE = { SUCCESS: 0, FAIL: 1000 };
 
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   
   // Handle CORS
   if (request.method === 'OPTIONS') {
@@ -18,14 +18,60 @@ export async function onRequest(context) {
     });
   }
 
+  // Helper: check if ADMIN_TOKEN environment variable is set
+  const hasAdminToken = env.ADMIN_TOKEN;
+
+  // Helper: get the effective token (ADMIN_TOKEN takes priority over KV stored token)
+  async function getEffectiveToken() {
+    if (hasAdminToken) return env.ADMIN_TOKEN;
+    return await OPEN_KOUNTER.get('system:token');
+  }
+
   try {
     if (request.method === 'POST') {
       const body = await request.json();
-      const { token, newToken, managementToken } = body;
-      const storedToken = await OPEN_KOUNTER.get('system:token');
+      const { action, token, newToken, managementToken } = body;
+
+      // get_status: return system status info (no auth required)
+      if (action === 'get_status') {
+        const storedToken = await OPEN_KOUNTER.get('system:token');
+        return new Response(JSON.stringify({
+          code: RES_CODE.SUCCESS,
+          data: {
+            hasAdminToken: !!hasAdminToken,
+            initialized: !!storedToken
+          }
+        }), {
+          headers: getCorsHeaders(request),
+          status: 200
+        });
+      }
+
+      const effectiveToken = await getEffectiveToken();
       
-      if (!storedToken) {
+      if (!effectiveToken) {
         return new Response(JSON.stringify({ code: RES_CODE.FAIL, message: 'Not initialized' }), {
+          headers: getCorsHeaders(request),
+          status: 200
+        });
+      }
+
+      // syncAdminToken: overwrite KV token with ADMIN_TOKEN (requires ADMIN_TOKEN auth)
+      if (action === 'syncAdminToken') {
+        if (!hasAdminToken) {
+          return new Response(JSON.stringify({ code: RES_CODE.FAIL, message: 'ADMIN_TOKEN not configured' }), {
+            headers: getCorsHeaders(request),
+            status: 200
+          });
+        }
+        if (!token || token !== env.ADMIN_TOKEN) {
+          return new Response(JSON.stringify({ code: RES_CODE.FAIL, message: 'Invalid ADMIN_TOKEN' }), {
+            headers: getCorsHeaders(request),
+            status: 200
+          });
+        }
+        await OPEN_KOUNTER.put('system:token', env.ADMIN_TOKEN);
+        return new Response(JSON.stringify({ code: RES_CODE.SUCCESS, message: 'KV token synced with ADMIN_TOKEN' }), {
           headers: getCorsHeaders(request),
           status: 200
         });
@@ -34,17 +80,16 @@ export async function onRequest(context) {
       let authorized = false;
       let mgmtTokenKey = null;
 
-      // 验证旧 Token
-      if (token && token === storedToken) {
+      // Verify token (accept both KV stored token and ADMIN_TOKEN)
+      if (token && (token === effectiveToken || (hasAdminToken && token === env.ADMIN_TOKEN))) {
         authorized = true;
       }
-      // 验证 Management Token (Passkey)
+      // Verify Management Token (Passkey)
       else if (managementToken) {
         mgmtTokenKey = `passkey:mgmt_token:${managementToken}`;
         const mgmtDataStr = await OPEN_KOUNTER.get(mgmtTokenKey);
         if (mgmtDataStr) {
           authorized = true;
-          // 可选：验证是否过期，但 KV TTL 会自动处理过期
         }
       }
 
@@ -52,7 +97,7 @@ export async function onRequest(context) {
         if (newToken) {
           await OPEN_KOUNTER.put('system:token', newToken);
           
-          // 如果使用了 managementToken，删除它以防止重放
+          // Delete managementToken to prevent replay
           if (mgmtTokenKey) {
             await OPEN_KOUNTER.delete(mgmtTokenKey);
           }

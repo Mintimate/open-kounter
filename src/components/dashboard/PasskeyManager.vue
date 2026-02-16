@@ -11,6 +11,24 @@ const username = ref('admin')
 const newToken = ref('')
 const oldToken = ref('')
 const authMethod = ref('passkey') // 'passkey' | 'token'
+const hasAdminToken = ref(false)
+
+// Check if ADMIN_TOKEN is configured on the server
+const checkStatus = async () => {
+  try {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_status' })
+    })
+    const data = await res.json()
+    if (data.code === 0) {
+      hasAdminToken.value = !!data.data.hasAdminToken
+    }
+  } catch (e) {
+    console.error('Check status error:', e)
+  }
+}
 
 // 检查是否已有 Passkey
 const checkPasskey = async () => {
@@ -40,6 +58,7 @@ const checkPasskey = async () => {
 
 onMounted(() => {
   checkPasskey()
+  checkStatus()
 })
 
 // 绑定/重新绑定 Passkey
@@ -113,6 +132,39 @@ const handleBindPasskey = async () => {
   } catch (e) {
     console.error('Bind passkey error:', e)
     message.value = `绑定失败: ${e.message}`
+  } finally {
+    loading.value = false
+  }
+}
+
+// Sync ADMIN_TOKEN to KV
+const handleSyncAdminToken = async () => {
+  if (!confirm('确定要使用 ADMIN_TOKEN 覆盖写入 KV 吗？覆盖后 KV 中的 Token 将与 ADMIN_TOKEN 保持一致，需要重新登录。')) return
+
+  loading.value = true
+  message.value = ''
+
+  try {
+    const res = await fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'syncAdminToken',
+        token: props.token
+      })
+    })
+    const data = await res.json()
+    if (data.code === 0) {
+      message.value = 'ADMIN_TOKEN 已覆盖写入 KV！即将重新加载...'
+      setTimeout(() => {
+        window.location.reload()
+      }, 1500)
+    } else {
+      throw new Error(data.message)
+    }
+  } catch (e) {
+    console.error('Sync admin token error:', e)
+    message.value = `同步失败: ${e.message}`
   } finally {
     loading.value = false
   }
@@ -286,6 +338,30 @@ function base64URLDecode(base64url) {
         </svg>
         <span>{{ loading ? '处理中...' : (hasPasskey ? '重新绑定' : '绑定 Passkey') }}</span>
       </button>
+
+      <!-- Sync ADMIN_TOKEN to KV -->
+      <div v-if="hasAdminToken" class="border-t border-dark-700 pt-2 mt-2">
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-xs text-gray-500">环境变量同步</p>
+          <div class="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-amber-400 text-xs flex items-center gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            ADMIN_TOKEN
+          </div>
+        </div>
+        <p class="text-xs text-gray-600 mb-2">检测到 ADMIN_TOKEN 环境变量，可将其覆盖写入 KV 存储</p>
+        <button
+          @click="handleSyncAdminToken"
+          :disabled="loading"
+          class="w-full py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm rounded-lg transition-colors border border-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>TOKEN 覆盖至 KV</span>
+        </button>
+      </div>
 
       <div v-if="hasPasskey" class="border-t border-dark-700 pt-2 mt-2">
         <div class="flex items-center justify-between mb-2">

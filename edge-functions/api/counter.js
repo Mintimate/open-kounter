@@ -1,7 +1,7 @@
 const RES_CODE = { SUCCESS: 0, FAIL: 1000 };
 
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   
   // Handle CORS
   if (request.method === 'OPTIONS') {
@@ -57,7 +57,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'set') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         if (!target) throw new Error('Missing target');
         if (value === undefined) throw new Error('Missing value');
         
@@ -82,7 +82,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'delete') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         if (!target) throw new Error('Missing target');
         await OPEN_KOUNTER.delete(`counter:${target}`);
         await removeFromIndex(target);
@@ -90,7 +90,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'list') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         const { page = 1, pageSize = 20 } = body;
         
         const indexKey = 'system:counter_index';
@@ -131,7 +131,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'get_config') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         const allowedDomainsData = await OPEN_KOUNTER.get('system:allowed_domains');
         const allowedDomains = allowedDomainsData ? JSON.parse(allowedDomainsData) : [];
         return new Response(JSON.stringify({ 
@@ -141,7 +141,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'set_config') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         const { allowedDomains } = body;
         if (!Array.isArray(allowedDomains)) throw new Error('allowedDomains must be an array');
         await OPEN_KOUNTER.put('system:allowed_domains', JSON.stringify(allowedDomains));
@@ -152,7 +152,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'export_all') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         
         // Fetch config and index in parallel
         const [allowedDomainsData, indexData] = await Promise.all([
@@ -181,7 +181,7 @@ export async function onRequest(context) {
           headers: getCorsHeaders(request)
         });
       } else if (action === 'import_all') {
-        await checkAuth(request);
+        await checkAuth(request, env);
         const { data } = body;
         
         if (!data || !data.counters) throw new Error('Invalid import data');
@@ -303,21 +303,24 @@ export async function onRequest(context) {
   }
 }
 
-async function checkAuth(request) {
+async function checkAuth(request, env) {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Error('Unauthorized');
   }
   const token = authHeader.split(' ')[1];
   
+  // If ADMIN_TOKEN is set, always accept it
+  const hasAdminToken = env.ADMIN_TOKEN;
+  if (hasAdminToken && token === env.ADMIN_TOKEN) {
+    return;
+  }
+  
   // Check against KV stored token
   const storedToken = await OPEN_KOUNTER.get('system:token');
   
   if (!storedToken) {
-      if (typeof ADMIN_TOKEN !== 'undefined' && token === ADMIN_TOKEN) {
-          return;
-      }
-      throw new Error('System not initialized or Unauthorized');
+    throw new Error('System not initialized or Unauthorized');
   }
 
   if (token !== storedToken) {

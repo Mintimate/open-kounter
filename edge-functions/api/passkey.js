@@ -35,7 +35,7 @@ function getRPConfig(request) {
  * EdgeOne Pages Edge Function 入口
  */
 export async function onRequest(context) {
-  const { request } = context;
+  const { request, env } = context;
   
   // 处理 CORS 预检请求
   if (request.method === 'OPTIONS') {
@@ -68,7 +68,7 @@ export async function onRequest(context) {
     
     switch (action) {
       case 'generateRegistrationOptions':
-        res = await handleGenerateRegistrationOptions(data, rpConfig);
+        res = await handleGenerateRegistrationOptions(data, rpConfig, env);
         break;
       case 'verifyRegistration':
         res = await handleVerifyRegistration(data, rpConfig);
@@ -294,16 +294,18 @@ async function validateManagementToken(tokenId, expectedUserId) {
 
 // ==================== 注册流程 ====================
 
-async function handleGenerateRegistrationOptions(data, rpConfig) {
+async function handleGenerateRegistrationOptions(data, rpConfig, env) {
   const { username, token } = data;
   
   if (!username || !token) {
     return { code: RES_CODE.FAIL, message: 'Username and token are required' };
   }
   
-  // 验证 token 是否有效
+  // 验证 token 是否有效 (accept ADMIN_TOKEN if set)
+  const hasAdminToken = env.ADMIN_TOKEN;
   const storedToken = await OPEN_KOUNTER.get('system:token');
-  if (!storedToken || token !== storedToken) {
+  const tokenValid = (storedToken && token === storedToken) || (hasAdminToken && token === env.ADMIN_TOKEN);
+  if (!tokenValid) {
     return { code: RES_CODE.FAIL, message: 'Invalid token' };
   }
   
