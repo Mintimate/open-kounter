@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import ConfirmModal from '../common/ConfirmModal.vue'
 
 const props = defineProps(['token'])
 
@@ -12,6 +13,10 @@ const newToken = ref('')
 const oldToken = ref('')
 const authMethod = ref('passkey') // 'passkey' | 'token'
 const hasAdminToken = ref(false)
+
+// Modal states
+const showSyncModal = ref(false)
+const showUpdateModal = ref(false)
 
 // Check if ADMIN_TOKEN is configured on the server
 const checkStatus = async () => {
@@ -138,9 +143,11 @@ const handleBindPasskey = async () => {
 }
 
 // Sync ADMIN_TOKEN to KV
-const handleSyncAdminToken = async () => {
-  if (!confirm('确定要使用 ADMIN_TOKEN 覆盖写入 KV 吗？覆盖后 KV 中的 Token 将与 ADMIN_TOKEN 保持一致，需要重新登录。')) return
+const openSyncModal = () => {
+  showSyncModal.value = true
+}
 
+const executeSyncAdminToken = async () => {
   loading.value = true
   message.value = ''
 
@@ -155,6 +162,7 @@ const handleSyncAdminToken = async () => {
     })
     const data = await res.json()
     if (data.code === 0) {
+      showSyncModal.value = false
       message.value = 'ADMIN_TOKEN 已覆盖写入 KV！即将重新加载...'
       setTimeout(() => {
         window.location.reload()
@@ -171,24 +179,26 @@ const handleSyncAdminToken = async () => {
 }
 
 // 通过 Passkey 或旧 Token 更新 Token
-const handleUpdateToken = async () => {
+const openUpdateModal = () => {
   if (!newToken.value) return
-  
+
   if (authMethod.value === 'passkey' && !hasPasskey.value) {
     message.value = '请先绑定 Passkey'
     return
   }
-  
+
   if (authMethod.value === 'token' && !oldToken.value) {
     message.value = '请输入旧 Token'
     return
   }
-  
-  if (!confirm('确定要更新 Token 吗？更新后需要重新登录。')) return
 
+  showUpdateModal.value = true
+}
+
+const executeUpdateToken = async () => {
   loading.value = true
   message.value = ''
-  
+
   try {
     let managementToken = null
 
@@ -203,13 +213,13 @@ const handleUpdateToken = async () => {
         })
       })
       const optionsData = await optionsRes.json()
-      
+
       if (optionsData.code !== 0) {
         throw new Error(optionsData.message)
       }
-      
+
       const { options, challengeId } = optionsData.data
-      
+
       // 2. 调用 WebAuthn API
       const credential = await navigator.credentials.get({
         publicKey: {
@@ -221,7 +231,7 @@ const handleUpdateToken = async () => {
           }))
         }
       })
-      
+
       // 3. 获取 Management Token
       const tokenRes = await fetch('/api/passkey', {
         method: 'POST',
@@ -244,21 +254,21 @@ const handleUpdateToken = async () => {
           }
         })
       })
-      
+
       const tokenData = await tokenRes.json()
-      
+
       if (tokenData.code !== 0) {
         throw new Error(tokenData.message)
       }
-      
+
       managementToken = tokenData.data.managementToken
     }
-    
+
     // 4. 更新 Token
     const updateBody = {
       newToken: newToken.value
     }
-    
+
     if (authMethod.value === 'passkey') {
       updateBody.managementToken = managementToken
     } else {
@@ -270,10 +280,11 @@ const handleUpdateToken = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updateBody)
     })
-    
+
     const updateData = await updateRes.json()
-    
+
     if (updateData.code === 0) {
+      showUpdateModal.value = false
       message.value = 'Token 更新成功！即将重新加载...'
       newToken.value = ''
       oldToken.value = ''
@@ -286,6 +297,7 @@ const handleUpdateToken = async () => {
   } catch (e) {
     console.error('Update token error:', e)
     message.value = `更新失败: ${e.message}`
+    showUpdateModal.value = false
   } finally {
     loading.value = false
   }
@@ -352,7 +364,7 @@ function base64URLDecode(base64url) {
         </div>
         <p class="text-xs text-gray-600 mb-2">检测到 ADMIN_TOKEN 环境变量，可将其覆盖写入 KV 存储</p>
         <button
-          @click="handleSyncAdminToken"
+          @click="openSyncModal"
           :disabled="loading"
           class="w-full py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm rounded-lg transition-colors border border-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
         >
@@ -396,7 +408,7 @@ function base64URLDecode(base64url) {
             class="w-full px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500 transition-colors placeholder-gray-600"
           />
           <button
-            @click="handleUpdateToken"
+            @click="openUpdateModal"
             :disabled="loading || !newToken || (authMethod === 'token' && !oldToken)"
             class="w-full py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -414,6 +426,42 @@ function base64URLDecode(base64url) {
       </div>
     </div>
   </div>
+
+  <!-- Sync ADMIN_TOKEN Modal -->
+  <ConfirmModal
+    v-model:show="showSyncModal"
+    title="同步 ADMIN_TOKEN"
+    variant="warning"
+    confirm-text="确认覆盖"
+    :loading="loading"
+    @confirm="executeSyncAdminToken"
+  >
+    <p class="text-gray-400 text-sm leading-relaxed">
+      确定要使用 <span class="text-amber-400 font-mono">ADMIN_TOKEN</span> 环境变量覆盖写入 KV 存储吗？
+    </p>
+    <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
+      <p>覆盖后 KV 中的 Token 将与 ADMIN_TOKEN 保持一致，需要重新登录。</p>
+    </div>
+  </ConfirmModal>
+
+  <!-- Update Token Modal -->
+  <ConfirmModal
+    v-model:show="showUpdateModal"
+    title="危险操作确认"
+    variant="warning"
+    confirm-text="确认更新"
+    :loading="loading"
+    @confirm="executeUpdateToken"
+  >
+    <p class="text-gray-400 text-sm leading-relaxed">
+      您正在尝试更新 Token。此操作将 <span class="text-amber-400 font-bold">使当前 Token 失效</span>，更新后需要重新登录。
+    </p>
+    <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
+      <p v-if="authMethod === 'passkey'">将使用 Passkey 验证身份后更新 Token。</p>
+      <p v-else>将使用旧 Token 验证身份后更新 Token。</p>
+      <p class="mt-1 text-amber-500/80">注意：请确保牢记新的 Token，更新后旧 Token 将无法使用。</p>
+    </div>
+  </ConfirmModal>
 </template>
 
 <style scoped>
