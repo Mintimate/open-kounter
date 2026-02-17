@@ -100,17 +100,17 @@ defineExpose({ loadConfig })
     </div>
 
     <div class="space-y-3">
-      <div class="flex gap-2">
+      <div class="flex flex-col sm:flex-row gap-2">
         <input 
           v-model="newDomain" 
           placeholder="https://example.com"
           @keyup.enter="addDomain"
-          class="flex-1 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors"
+          class="flex-1 min-w-0 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors"
         />
         <button 
           @click="addDomain" 
           :disabled="configLoading" 
-          class="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50"
+          class="w-full sm:w-auto px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 shrink-0"
         >
           添加
         </button>

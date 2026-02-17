@@ -86,16 +86,16 @@ const handleDelete = () => {
     
     <div class="space-y-2">
       <div>
-        <div class="flex gap-2">
+        <div class="flex flex-col sm:flex-row gap-2">
           <input 
             v-model="target" 
             placeholder="Target Key" 
-            class="flex-1 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
+            class="flex-1 min-w-0 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
           />
           <button 
             @click="handleGet" 
             :disabled="singleLoading" 
-            class="px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+            class="w-full sm:w-auto px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
           >
             查询
           </button>
@@ -103,17 +103,17 @@ const handleDelete = () => {
       </div>
 
       <div v-if="result || target" class="pt-2 border-t border-dark-700">
-        <div class="flex gap-2">
+        <div class="flex flex-col sm:flex-row gap-2">
           <input 
             type="number" 
             v-model="value" 
             placeholder="Value"
-            class="flex-1 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
+            class="flex-1 min-w-0 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
           />
           <button 
             @click="handleSet" 
             :disabled="singleLoading" 
-            class="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+            class="w-full sm:w-auto px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
           >
             更新
           </button>
