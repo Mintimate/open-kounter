@@ -1,22 +1,31 @@
 {
   "name": "open-kounter-admin",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"vite\" \"node --no-deprecation server/index.js\"",
+    "dev:frontend": "vite",
+    "dev:server": "node --no-deprecation server/index.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "NODE_ENV=production node --no-deprecation server/index.js",
+    "deploy:edgeone": "edgeone deploy"
   },
   "dependencies": {
     "vue": "^3.3.28",
-    "vue-router": "^5.0.2"
+    "vue-router": "^5.0.2",
+    "express": "^5.2.0",
+    "sql.js": "^1.14.0",
+    "cors": "^2.8.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.4",
+    "@tailwindcss/postcss": "^4.1.18",
     "autoprefixer": "^10.4.14",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "concurrently": "^9.2.1"
   }
 }

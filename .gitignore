@@ -31,3 +31,9 @@ dist-ssr
 
 # EdgeOne
 .edgeone
+
+# SQLite Database
+data/*.db
+data/*.db-shm
+data/*.db-wal
+!data/.gitkeep
