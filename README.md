@@ -2,6 +2,8 @@
 
 Open Kounter 是一个基于 EdgeOne Pages Functions 和 KV 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单和 Passkey 无密码登录。
 
+![Open Kounter Demo](./other/demoOfAdmin.webp)
+
 更详细的介绍和部署指南请参考：
 - [LeanCloud 遗憾谢幕：基于 EdgeOne KV 打造高性能 PV/UV 访客统计](https://www.mintimate.cn/2026/02/14/openKounter/)
 
