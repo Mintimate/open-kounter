@@ -1,6 +1,8 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 
+import ConfirmModal from '../common/ConfirmModal.vue'
+
 const props = defineProps(['token'])
 const emit = defineEmits(['update:totalCount'])
 
@@ -16,6 +18,12 @@ const showEditModal = ref(false)
 const editingTarget = ref('')
 const editValue = ref(0)
 const editLoading = ref(false)
+const editError = ref('')
+
+// Delete confirm state
+const showDeleteModal = ref(false)
+const deletingTarget = ref('')
+const deleteLoading = ref(false)
 
 const loadCounters = async () => {
   loading.value = true
@@ -56,10 +64,17 @@ const handlePageSizeChange = () => {
   loadCounters()
 }
 
-const deleteCounter = async (targetKey) => {
-  if (!confirm(`确定要删除 "${targetKey}" 的计数器吗？`)) return
-  
-  loading.value = true
+const requestDelete = (targetKey) => {
+  deletingTarget.value = targetKey
+  showDeleteModal.value = true
+}
+
+const confirmDelete = async () => {
+  const targetKey = deletingTarget.value
+  if (!targetKey) return
+
+  deleteLoading.value = true
+  error.value = ''
   try {
     const res = await fetch('/api/counter', {
       method: 'POST',
@@ -72,10 +87,12 @@ const deleteCounter = async (targetKey) => {
         target: targetKey
       })
     })
-    
+
     const data = await res.json()
-    
+
     if (data.code === 0) {
+      showDeleteModal.value = false
+      deletingTarget.value = ''
       loadCounters()
     } else {
       error.value = data.message
@@ -83,22 +100,25 @@ const deleteCounter = async (targetKey) => {
   } catch (e) {
     error.value = e.message
   } finally {
-    loading.value = false
+    deleteLoading.value = false
   }
 }
 
 const openEditModal = (item) => {
   editingTarget.value = item.target
   editValue.value = item.count
+  editError.value = ''
   showEditModal.value = true
 }
 
 const updateCounter = async () => {
-  if (editValue.value < 0) {
-    alert('计数值不能为负数')
+  editError.value = ''
+
+  if (editValue.value === '' || editValue.value === null || editValue.value < 0) {
+    editError.value = '计数值不能为负数'
     return
   }
-  
+
   editLoading.value = true
   try {
     const res = await fetch('/api/counter', {
@@ -110,20 +130,20 @@ const updateCounter = async () => {
       body: JSON.stringify({
         action: 'set',
         target: editingTarget.value,
-        value: editValue.value
+        value: Number(editValue.value)
       })
     })
-    
+
     const data = await res.json()
-    
+
     if (data.code === 0) {
       showEditModal.value = false
       loadCounters()
     } else {
-      alert(data.message || '更新失败')
+      editError.value = data.message || '更新失败'
     }
   } catch (e) {
-    alert('更新失败: ' + e.message)
+    editError.value = '更新失败：' + e.message
   } finally {
     editLoading.value = false
   }
@@ -208,8 +228,8 @@ defineExpose({ loadCounters })
                   编辑
                 </button>
                 <button 
-                  @click="deleteCounter(item.target)" 
-                  class="text-xs text-red-400 hover:text-red-300 hover:underline disabled:opacity-50"
+                  @click="requestDelete(item.target)" 
+                  class="text-xs text-danger hover:text-danger-hover hover:underline disabled:opacity-50"
                   :disabled="loading"
                 >
                   删除
@@ -280,14 +300,32 @@ defineExpose({ loadCounters })
           </button>
           <button 
             @click="updateCounter"
-            class="px-4 py-2 text-sm bg-primary hover:bg-primary-dark text-white rounded-lg transition-colors disabled:opacity-50"
+            class="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
             :disabled="editLoading"
           >
             {{ editLoading ? '保存中...' : '保存' }}
           </button>
         </div>
+
+        <p v-if="editError" class="mt-3 text-xs text-danger">{{ editError }}</p>
       </div>
     </div>
+
+    <!-- Delete Confirm Modal -->
+    <ConfirmModal
+      :show="showDeleteModal"
+      title="删除计数器"
+      variant="danger"
+      :loading="deleteLoading"
+      confirm-text="确认删除"
+      @confirm="confirmDelete"
+      @cancel="showDeleteModal = false"
+      @update:show="showDeleteModal = $event"
+    >
+      <p class="text-sm text-gray-400">
+        确定要删除计数器 <span class="font-mono text-primary">{{ deletingTarget }}</span> 吗？该操作不可恢复。
+      </p>
+    </ConfirmModal>
   </div>
 </template>
 

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -28,7 +28,7 @@ onMounted(() => {
       <div class="relative z-10 bg-dark-800/50 backdrop-blur-xl border border-dark-700/50 rounded-3xl p-12 shadow-2xl overflow-hidden group">
         
         <!-- 装饰性背景纹理 -->
-        <div class="absolute inset-0 opacity-20 bg-[radial-gradient(#409eff_1px,transparent_1px)] [background-size:16px_16px]"></div>
+        <div class="absolute inset-0 opacity-20 dot-pattern"></div>
 
         <!-- 404 大字 -->
         <div class="relative mb-8">
@@ -111,6 +111,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.dot-pattern {
+  background-image: radial-gradient(var(--color-primary) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
 @keyframes float {
   0%, 100% {
     transform: translateY(0);

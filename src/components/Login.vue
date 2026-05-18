@@ -288,7 +288,7 @@ function base64URLDecode(base64url) {
         </div>
       </div>
 
-      <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-purple-400 mb-2">
+      <h1 class="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-primary to-primary-dark mb-2">
         Open Kounter
       </h1>
       <p class="text-gray-400 mb-8">
@@ -304,9 +304,9 @@ function base64URLDecode(base64url) {
       <!-- Loading State -->
       <div v-if="checkingStatus" class="flex flex-col items-center justify-center space-y-6 animate-fade-in z-10">
         <div class="flex space-x-3">
-          <div class="w-3.5 h-3.5 bg-primary rounded-full animate-bounce shadow-[0_0_10px_rgba(99,102,241,0.6)]" style="animation-delay: -0.3s"></div>
-          <div class="w-3.5 h-3.5 bg-purple-500 rounded-full animate-bounce shadow-[0_0_10px_rgba(168,85,247,0.6)]" style="animation-delay: -0.15s"></div>
-          <div class="w-3.5 h-3.5 bg-blue-500 rounded-full animate-bounce shadow-[0_0_10px_rgba(59,130,246,0.6)]"></div>
+          <div class="w-3.5 h-3.5 bg-primary rounded-full animate-bounce shadow-lg shadow-primary/50" style="animation-delay: -0.3s"></div>
+          <div class="w-3.5 h-3.5 bg-primary-hover rounded-full animate-bounce shadow-lg shadow-primary-hover/50" style="animation-delay: -0.15s"></div>
+          <div class="w-3.5 h-3.5 bg-primary/70 rounded-full animate-bounce shadow-lg shadow-primary/40"></div>
         </div>
         <p class="text-sm font-medium text-gray-400 tracking-wider">正在检测登录环境...</p>
       </div>
@@ -333,7 +333,7 @@ function base64URLDecode(base64url) {
         <button 
           @click="handleSubmit" 
           :disabled="loading || migrationLoading"
-          class="w-full py-3.5 bg-gradient-to-r from-primary to-purple-600 hover:from-primary-hover hover:to-purple-500 text-white font-bold rounded-xl shadow-lg shadow-primary/25 hover:shadow-primary/40 transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2"
+          class="w-full py-3.5 bg-gradient-to-r from-primary to-primary-dark hover:from-primary-hover hover:to-primary text-white font-bold rounded-xl shadow-lg shadow-primary/25 hover:shadow-primary/40 transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2"
         >
           <svg v-if="loading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -467,7 +467,12 @@ function base64URLDecode(base64url) {
 
 .glow-outer {
   inset: -0.75rem;
-  background: linear-gradient(to right, var(--color-primary, #6366f1), rgb(168, 85, 247), rgb(59, 130, 246));
+  background: linear-gradient(
+    to right,
+    var(--color-primary),
+    var(--color-primary-hover),
+    var(--color-primary-dark)
+  );
   filter: blur(24px);
   -webkit-filter: blur(24px);
   opacity: 0.3;
@@ -475,7 +480,12 @@ function base64URLDecode(base64url) {
 
 .glow-inner {
   inset: -0.25rem;
-  background: linear-gradient(to right, rgba(99, 102, 241, 0.4), rgba(168, 85, 247, 0.4), rgba(59, 130, 246, 0.4));
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-primary) 40%, transparent),
+    color-mix(in srgb, var(--color-primary-hover) 40%, transparent),
+    color-mix(in srgb, var(--color-primary-dark) 40%, transparent)
+  );
   filter: blur(12px);
   -webkit-filter: blur(12px);
   opacity: 0;

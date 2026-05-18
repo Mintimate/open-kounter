@@ -39,9 +39,9 @@ const handleCancel = () => {
 }
 
 const variantClasses = {
-  primary: 'bg-primary hover:bg-primary-dark',
-  danger: 'bg-red-600 hover:bg-red-500',
-  warning: 'bg-amber-500 hover:bg-amber-600'
+  primary: 'bg-primary hover:bg-primary-hover',
+  danger: 'bg-danger hover:bg-danger-hover',
+  warning: 'bg-warning hover:bg-warning-hover'
 }
 </script>
 

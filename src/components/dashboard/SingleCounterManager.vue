@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue'
 
+import ConfirmModal from '../common/ConfirmModal.vue'
+
 const props = defineProps(['token'])
 const emit = defineEmits(['refresh'])
 
@@ -9,6 +11,9 @@ const value = ref('')
 const result = ref(null)
 const singleError = ref('')
 const singleLoading = ref(false)
+
+const showDeleteModal = ref(false)
+const deleteLoading = ref(false)
 
 const callApi = async (action, payload = {}) => {
   singleLoading.value = true
@@ -74,8 +79,17 @@ const handleSet = () => {
 
 const handleDelete = () => {
   if (!target.value) return
-  if (!confirm(`确定要删除 "${target.value}" 的计数器吗？`)) return
-  callApi('delete')
+  showDeleteModal.value = true
+}
+
+const confirmDelete = async () => {
+  deleteLoading.value = true
+  try {
+    await callApi('delete')
+  } finally {
+    deleteLoading.value = false
+    showDeleteModal.value = false
+  }
 }
 </script>
 
@@ -113,7 +127,7 @@ const handleDelete = () => {
           <button 
             @click="handleSet" 
             :disabled="singleLoading" 
-            class="w-full sm:w-auto px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
+            class="w-full sm:w-auto px-3 py-1.5 bg-warning hover:bg-warning-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
           >
             更新
           </button>
@@ -124,7 +138,7 @@ const handleDelete = () => {
         <button 
           @click="handleDelete" 
           :disabled="singleLoading" 
-          class="w-full py-1 border border-red-500/30 text-red-400 hover:bg-red-500/10 text-xs rounded-lg transition-colors disabled:opacity-50"
+          class="w-full py-1 border border-danger/30 text-danger hover:bg-danger/10 text-xs rounded-lg transition-colors disabled:opacity-50"
         >
           删除此计数器
         </button>
@@ -137,7 +151,22 @@ const handleDelete = () => {
         </div>
       </div>
 
-      <div v-if="singleError" class="text-xs text-red-400 mt-1">{{ singleError }}</div>
+      <div v-if="singleError" class="text-xs text-danger mt-1">{{ singleError }}</div>
     </div>
+
+    <ConfirmModal
+      :show="showDeleteModal"
+      title="删除计数器"
+      variant="danger"
+      :loading="deleteLoading"
+      confirm-text="确认删除"
+      @confirm="confirmDelete"
+      @cancel="showDeleteModal = false"
+      @update:show="showDeleteModal = $event"
+    >
+      <p class="text-sm text-gray-400">
+        确定要删除计数器 <span class="font-mono text-primary">{{ target }}</span> 吗？该操作不可恢复。
+      </p>
+    </ConfirmModal>
   </div>
 </template>

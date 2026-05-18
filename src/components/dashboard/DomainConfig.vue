@@ -7,6 +7,7 @@ const allowedDomains = ref([])
 const newDomain = ref('')
 const configLoading = ref(false)
 const configError = ref('')
+const configSuccess = ref('')
 
 const loadConfig = async () => {
   configLoading.value = true
@@ -41,7 +42,8 @@ const loadConfig = async () => {
 const saveConfig = async () => {
   configLoading.value = true
   configError.value = ''
-  
+  configSuccess.value = ''
+
   try {
     const res = await fetch('/api/counter', {
       method: 'POST',
@@ -54,11 +56,14 @@ const saveConfig = async () => {
         allowedDomains: allowedDomains.value
       })
     })
-    
+
     const data = await res.json()
-    
+
     if (data.code === 0) {
-      alert('配置保存成功！')
+      configSuccess.value = '配置已保存'
+      setTimeout(() => {
+        configSuccess.value = ''
+      }, 2000)
     } else {
       configError.value = data.message
     }
@@ -110,7 +115,7 @@ defineExpose({ loadConfig })
         <button 
           @click="addDomain" 
           :disabled="configLoading" 
-          class="w-full sm:w-auto px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition-colors disabled:opacity-50 shrink-0"
+          class="w-full sm:w-auto px-3 py-1.5 bg-success hover:bg-success-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 shrink-0"
         >
           添加
         </button>
@@ -119,7 +124,7 @@ defineExpose({ loadConfig })
       <div class="space-y-2 max-h-32 overflow-y-auto pr-1">
         <div v-for="(domain, index) in allowedDomains" :key="index" class="flex justify-between items-center p-1.5 bg-dark-900 rounded border border-dark-700 group">
           <span class="text-xs font-mono text-gray-300 truncate">{{ domain }}</span>
-          <button @click="removeDomain(index)" class="text-gray-500 hover:text-red-400 transition-colors">
+          <button @click="removeDomain(index)" class="text-gray-500 hover:text-danger transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
               <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
             </svg>
@@ -138,7 +143,8 @@ defineExpose({ loadConfig })
         {{ configLoading ? '保存中...' : '保存配置' }}
       </button>
 
-      <div v-if="configError" class="text-xs text-red-400 mt-1">{{ configError }}</div>
+      <div v-if="configSuccess" class="text-xs text-success mt-1">{{ configSuccess }}</div>
+      <div v-if="configError" class="text-xs text-danger mt-1">{{ configError }}</div>
     </div>
   </div>
 </template>
