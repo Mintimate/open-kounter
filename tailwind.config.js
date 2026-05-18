@@ -16,7 +16,20 @@ export default {
         primary: {
           DEFAULT: '#409eff',
           hover: '#66b1ff',
-        }
+          dark: '#3a8ee6',
+        },
+        success: {
+          DEFAULT: '#22c55e',
+          hover: '#16a34a',
+        },
+        danger: {
+          DEFAULT: '#ef4444',
+          hover: '#dc2626',
+        },
+        warning: {
+          DEFAULT: '#f59e0b',
+          hover: '#d97706',
+        },
       }
     },
   },
