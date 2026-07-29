@@ -7,6 +7,39 @@ Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务
 更详细的介绍和部署指南请参考：
 - [LeanCloud 遗憾谢幕：基于 EdgeOne Blob 打造高性能 PV/UV 访客统计](https://www.mintimate.cn/2026/02/14/openKounter/)
 
+## 安装 AI Skill
+
+本仓库提供 `migrate-to-open-kounter` Skill，可帮助 AI 检查网站中的 LeanCloud 计数逻辑，并自动适配到用户已经部署的 Open Kounter。
+
+> 使用前必须先部署 Open Kounter，并向 AI 提供可访问的 HTTPS 服务域名。未部署或未提供域名时，Skill 会拒绝修改项目。
+>
+> 请在需要迁移的目标项目根目录执行安装命令。该 Skill 建议按项目安装，不建议使用 `-g` 全局安装。
+
+### 中国大陆：推荐使用 CNB
+
+```bash
+npx skills add https://cnb.cool/Mintimate/tool-forge/open-kounter.git --skill migrate-to-open-kounter -y
+```
+
+### 非中国大陆：推荐使用 GitHub
+
+```bash
+npx skills add https://github.com/Mintimate/open-kounter.git --skill migrate-to-open-kounter -y
+```
+
+如需只安装到指定 Agent，可增加 `--agent` 参数，例如安装到 Codex：
+
+```bash
+npx skills add https://cnb.cool/Mintimate/tool-forge/open-kounter.git --skill migrate-to-open-kounter --agent codex -y
+```
+
+安装后可通过 `$migrate-to-open-kounter` 调用，例如：
+
+```text
+使用 $migrate-to-open-kounter，把当前项目的 LeanCloud 计数替换为 Open Kounter。
+Open Kounter 服务地址：https://counter.example.com
+```
+
 ## EdgeOne Pages 上部署
 
 你可以通过 EdgeOne Pages 一键部署或手动配置构建：
