@@ -183,7 +183,7 @@ onMounted(async () => {
         <p class="text-sm text-gray-500">
           Designed by <a href="https://www.mintimate.cn" target="_blank" class="font-medium text-gray-400 hover:text-primary transition-colors">Mintimate</a>
           <span class="mx-2">·</span>
-          Powered by EdgeOne Pages
+          Powered by EdgeOne Makers
         </p>
       </footer>
     </template>
