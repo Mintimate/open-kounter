@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@edgeone/pages-blob": "^0.0.7",
+    "@edgeone/pages-blob": "^0.0.14",
     "vue": "^3.3.28",
     "vue-router": "^5.0.2"
   },
