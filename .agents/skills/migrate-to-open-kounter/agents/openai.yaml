@@ -1,0 +1,4 @@
+interface:
+  display_name: "Migrate to Open Kounter"
+  short_description: "Replace LeanCloud counters with a deployed Open Kounter"
+  default_prompt: "Use $migrate-to-open-kounter to replace this project’s LeanCloud counter with my deployed Open Kounter domain."
