@@ -342,7 +342,7 @@ function base64URLDecode(base64url) {
       <button
         @click="handleBindPasskey"
         :disabled="loading"
-        class="w-full py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2 disabled:opacity-50"
+        class="button-secondary button-compact w-full"
       >
         <svg v-if="loading" class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -366,7 +366,7 @@ function base64URLDecode(base64url) {
         <button
           @click="openSyncModal"
           :disabled="loading"
-          class="w-full py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-sm rounded-lg transition-colors border border-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+          class="button-warning-outline button-compact w-full"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -398,19 +398,19 @@ function base64URLDecode(base64url) {
             v-model="oldToken" 
             type="password" 
             placeholder="输入旧 Token"
-            class="w-full px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500 transition-colors placeholder-gray-600"
+            class="form-control field-compact w-full"
           />
           
           <input 
             v-model="newToken" 
             type="password" 
             placeholder="输入新 Token"
-            class="w-full px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500 transition-colors placeholder-gray-600"
+            class="form-control field-compact w-full"
           />
           <button
             @click="openUpdateModal"
             :disabled="loading || !newToken || (authMethod === 'token' && !oldToken)"
-            class="w-full py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="button-secondary button-compact w-full"
           >
             <span>{{ authMethod === 'passkey' ? '验证 Passkey 并更新' : '更新 Token' }}</span>
           </button>
