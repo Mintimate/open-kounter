@@ -181,7 +181,7 @@ defineExpose({ loadCounters })
         <select 
           v-model="pageSize" 
           @change="handlePageSizeChange"
-          class="px-2 py-1.5 text-xs bg-dark-700 text-gray-200 rounded-md border border-dark-600 focus:outline-none focus:border-primary cursor-pointer"
+          class="form-select field-compact"
         >
           <option :value="10">10 条/页</option>
           <option :value="20">20 条/页</option>
@@ -191,7 +191,7 @@ defineExpose({ loadCounters })
         <button 
           @click="loadCounters" 
           :disabled="loading"
-          class="px-3 py-1.5 text-xs bg-dark-700 hover:bg-dark-600 text-gray-200 rounded-md transition-colors border border-dark-600"
+          class="button-secondary button-compact"
         >
           {{ loading ? '加载中...' : '刷新' }}
         </button>
@@ -248,7 +248,7 @@ defineExpose({ loadCounters })
     <!-- Pagination -->
     <div v-if="counters.length > 0" class="px-4 py-3 border-t border-dark-700 flex justify-center items-center gap-4">
       <button 
-        class="px-2 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:text-gray-400"
+        class="px-2 py-1 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:hover:text-gray-400"
         @click="goToPage(currentPage - 1)" 
         :disabled="currentPage === 1 || loading"
       >
@@ -258,7 +258,7 @@ defineExpose({ loadCounters })
         {{ currentPage }} / {{ totalPages }}
       </span>
       <button 
-        class="px-2 py-1 text-xs text-gray-400 hover:text-white disabled:opacity-30 disabled:hover:text-gray-400"
+        class="px-2 py-1 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:hover:text-gray-400"
         @click="goToPage(currentPage + 1)" 
         :disabled="currentPage === totalPages || loading"
       >
@@ -277,7 +277,7 @@ defineExpose({ loadCounters })
             type="text" 
             :value="editingTarget" 
             disabled
-            class="w-full px-3 py-2 bg-dark-900 border border-dark-700 rounded-lg text-gray-500 text-sm"
+            class="form-control w-full px-3 py-2 text-base md:text-sm"
           />
         </div>
         
@@ -286,21 +286,21 @@ defineExpose({ loadCounters })
           <input 
             type="number" 
             v-model="editValue" 
-            class="w-full px-3 py-2 bg-dark-900 border border-dark-700 rounded-lg text-white text-sm focus:border-primary focus:outline-none"
+            class="form-control w-full px-3 py-2 text-base md:text-sm"
           />
         </div>
         
         <div class="flex justify-end gap-3">
           <button 
             @click="showEditModal = false"
-            class="px-4 py-2 text-sm text-gray-400 hover:text-white transition-colors"
+            class="button-secondary px-4 py-2 text-sm"
             :disabled="editLoading"
           >
             取消
           </button>
           <button 
             @click="updateCounter"
-            class="px-4 py-2 text-sm bg-primary hover:bg-primary-hover text-white rounded-lg transition-colors disabled:opacity-50"
+            class="button-primary px-4 py-2 text-sm"
             :disabled="editLoading"
           >
             {{ editLoading ? '保存中...' : '保存' }}

@@ -39,9 +39,9 @@ const handleCancel = () => {
 }
 
 const variantClasses = {
-  primary: 'bg-primary hover:bg-primary-hover',
-  danger: 'bg-danger hover:bg-danger-hover',
-  warning: 'bg-warning hover:bg-warning-hover'
+  primary: 'button-primary',
+  danger: 'button-danger-solid',
+  warning: 'button-warning'
 }
 </script>
 
@@ -62,7 +62,7 @@ const variantClasses = {
         <input 
           v-model="inputValue" 
           type="text" 
-          class="w-full px-3 py-2 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-red-500 transition-colors"
+          class="form-control w-full px-3 py-2 text-base focus:border-danger focus:ring-danger/20 md:text-sm"
           placeholder="在此输入确认文本"
         />
       </div>
@@ -72,7 +72,7 @@ const variantClasses = {
         <button 
           @click="handleCancel" 
           :disabled="loading"
-          class="flex-1 py-2 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 disabled:opacity-50"
+          class="button-secondary flex-1 px-3 py-2 text-sm"
         >
           {{ cancelText }}
         </button>
@@ -80,7 +80,7 @@ const variantClasses = {
           @click="handleConfirm" 
           :disabled="isConfirmDisabled()"
           :class="variantClasses[variant]"
-          class="flex-1 py-2 text-white text-sm rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+          class="flex-1 px-3 py-2 text-sm"
         >
           {{ loading ? '处理中...' : confirmText }}
         </button>

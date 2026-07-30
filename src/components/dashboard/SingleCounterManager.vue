@@ -104,12 +104,12 @@ const confirmDelete = async () => {
           <input 
             v-model="target" 
             placeholder="Target Key" 
-            class="flex-1 min-w-0 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
+            class="form-control field-compact min-w-0 flex-1"
           />
           <button 
             @click="handleGet" 
             :disabled="singleLoading" 
-            class="w-full sm:w-auto px-3 py-1.5 bg-primary hover:bg-primary-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
+            class="button-primary button-compact w-full min-w-16 shrink-0 whitespace-nowrap sm:w-auto"
           >
             查询
           </button>
@@ -122,12 +122,12 @@ const confirmDelete = async () => {
             type="number" 
             v-model="value" 
             placeholder="Value"
-            class="flex-1 min-w-0 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors" 
+            class="form-control field-compact min-w-0 flex-1"
           />
           <button 
             @click="handleSet" 
             :disabled="singleLoading" 
-            class="w-full sm:w-auto px-3 py-1.5 bg-warning hover:bg-warning-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap shrink-0"
+            class="button-warning button-compact w-full min-w-16 shrink-0 whitespace-nowrap sm:w-auto"
           >
             更新
           </button>
@@ -138,13 +138,13 @@ const confirmDelete = async () => {
         <button 
           @click="handleDelete" 
           :disabled="singleLoading" 
-          class="w-full py-1 border border-danger/30 text-danger hover:bg-danger/10 text-xs rounded-lg transition-colors disabled:opacity-50"
+          class="button-danger button-compact w-full"
         >
           删除此计数器
         </button>
       </div>
 
-      <div v-if="result" class="mt-2 bg-black rounded-lg border border-dark-700 overflow-hidden text-left">
+      <div v-if="result" class="mt-2 bg-dark-900 rounded-lg border border-dark-700 overflow-hidden text-left">
         <div v-for="(val, key) in result" :key="key" class="flex px-3 py-2 border-b border-dark-800 last:border-0">
           <span class="text-xs text-gray-500 w-24 shrink-0 font-medium truncate" :title="key">{{ key }}</span>
           <span class="text-xs text-green-400 font-mono break-all">{{ typeof val === 'object' ? JSON.stringify(val) : val }}</span>

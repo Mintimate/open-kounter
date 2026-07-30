@@ -110,19 +110,19 @@ defineExpose({ loadConfig })
           v-model="newDomain" 
           placeholder="https://example.com"
           @keyup.enter="addDomain"
-          class="flex-1 min-w-0 px-3 py-1.5 bg-dark-900 border border-dark-600 rounded-lg text-sm text-white focus:outline-none focus:border-primary transition-colors"
+          class="form-control field-compact min-w-0 flex-1"
         />
         <button 
           @click="addDomain" 
           :disabled="configLoading" 
-          class="w-full sm:w-auto px-3 py-1.5 bg-success hover:bg-success-hover text-white text-sm rounded-lg transition-colors disabled:opacity-50 shrink-0"
+          class="button-success button-compact w-full min-w-16 shrink-0 sm:w-auto"
         >
           添加
         </button>
       </div>
 
       <div class="space-y-2 max-h-32 overflow-y-auto pr-1">
-        <div v-for="(domain, index) in allowedDomains" :key="index" class="flex justify-between items-center p-1.5 bg-dark-900 rounded border border-dark-700 group">
+        <div v-for="(domain, index) in allowedDomains" :key="index" class="group flex items-center justify-between rounded-lg border border-field-border bg-field p-1.5">
           <span class="text-xs font-mono text-gray-300 truncate">{{ domain }}</span>
           <button @click="removeDomain(index)" class="text-gray-500 hover:text-danger transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -138,7 +138,7 @@ defineExpose({ loadConfig })
       <button 
         @click="saveConfig" 
         :disabled="configLoading" 
-        class="w-full py-1.5 bg-dark-700 hover:bg-dark-600 text-white text-sm rounded-lg transition-colors border border-dark-600 disabled:opacity-50 mt-1"
+        class="button-secondary button-compact mt-1 w-full"
       >
         {{ configLoading ? '保存中...' : '保存配置' }}
       </button>
