@@ -1,6 +1,6 @@
 # Open Kounter
 
-Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单、旧版 KV 一键迁移、Passkey 无密码登录和 OIDC 单点登录。
+Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单、旧版 KV 一键迁移、Passkey 无密码登录、OIDC 单点登录，以及亮色 / 跟随系统 / 暗色主题切换。
 
 ![Open Kounter Demo](./other/demoOfAdmin.webp)
 
@@ -127,6 +127,9 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │       └── migrate.js      # 导出旧 KV 数据供 Blob 导入
 ├── src/                    # 前端管理后台 (Vue 3 + Vite)
 │   ├── components/
+│   │   ├── common/
+│   │   │   ├── ConfirmModal.vue         # 通用确认弹窗
+│   │   │   └── ThemeSwitcher.vue        # 三段式主题切换
 │   │   ├── dashboard/
 │   │   │   ├── CounterList.vue          # 计数器列表
 │   │   │   ├── DataBackup.vue           # 数据备份与恢复
@@ -136,11 +139,12 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   │   │   ├── SingleCounterManager.vue # 单个计数器管理
 │   │   │   └── TotalStats.vue           # 统计概览
 │   │   ├── Dashboard.vue   # 仪表盘主组件
-│   │   └── Login.vue       # 登录组件
-│   ├── utils/              # 工具函数
+│   │   ├── Login.vue       # 登录组件
+│   │   └── NotFound.vue    # 404 页面
 │   ├── App.vue             # 主应用组件
 │   ├── main.js             # 入口文件
-│   └── style.css           # 全局样式
+│   ├── style.css           # 全局样式与主题 Token
+│   └── theme.js            # 主题解析与持久化
 ├── edgeone.json            # EdgeOne 配置文件
 ├── index.html              # HTML 入口
 ├── package.json            # 项目依赖
@@ -305,6 +309,18 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 | `OIDC_CLIENT_ID` | 否 | OIDC 客户端 ID |
 | `OIDC_CLIENT_SECRET` | 否 | OIDC 客户端密钥，仅保存在环境变量中 |
 | `OIDC_REDIRECT_URI` | 否 | OIDC 回调地址，例如 `https://your-domain.com/api/oidc/callback` |
+
+## 界面主题
+
+管理后台支持亮色、跟随系统和暗色三种模式，默认跟随操作系统。主题入口在登录页右上角和登录后的顶栏中：
+
+1. **亮色**：固定使用亮色 Token。
+2. **跟随系统**：监听操作系统主题变化并实时切换。
+3. **暗色**：固定使用暗色 Token。
+
+用户选择保存在浏览器的 `open_kounter_theme` 中；该值仅用于界面偏好，不包含认证信息。
+
+亮色和暗色模式共享统一的控件语义：仪表盘短操作按钮采用紧凑尺寸，并与相邻输入框保持等高；输入框独立保留移动端可读字号，避免聚焦时页面缩放。主色、成功和警示按钮使用随主题 Token 变化且满足可读对比度的低饱和色块。亮色模式下输入框统一为白底描边，暗色模式保持更深的输入区域；页面背景使用主题自适应的低对比度网格，丰富层次但不干扰内容阅读。
 
 ## 登录方式
 

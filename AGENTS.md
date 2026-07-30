@@ -38,7 +38,7 @@
   - **EdgeOne Pages Cloud Functions**（`cloud-functions/api/**.js`）：处理认证、计数器、Passkey、OIDC、初始化与迁移
   - **EdgeOne Pages Edge Functions**（`edge-functions/legacy-api/**.js`）：仅用于读取旧版 `OPEN_KOUNTER` KV 命名空间，导出供 Blob 导入
   - **Blob Store**：通过 `@edgeone/pages-blob` 创建，默认 store 名 `open-kounter`，可经 `OPEN_KOUNTER_BLOB_STORE` 覆盖
-- **状态管理**：本仓库**不引入 Pinia / Vuex**。组件间状态优先使用 props/emit；登录态保存在 `App.vue` 的 `ref` 中并下发；持久化仅写 `localStorage` 的 `open_kounter_token`
+- **状态管理**：本仓库**不引入 Pinia / Vuex**。组件间状态优先使用 props/emit；登录态保存在 `App.vue` 的 `ref` 中并下发；持久化仅写 `localStorage` 的 `open_kounter_token` 与非敏感主题偏好 `open_kounter_theme`
 
 ### 目录分层
 
@@ -65,7 +65,8 @@
 ├── src/                        # 前端管理后台（Vue 3 + Vite）
 │   ├── components/
 │   │   ├── common/
-│   │   │   └── ConfirmModal.vue        # 通用确认弹窗
+│   │   │   ├── ConfirmModal.vue        # 通用确认弹窗
+│   │   │   └── ThemeSwitcher.vue       # 亮色 / 系统 / 暗色三段式切换
 │   │   ├── dashboard/
 │   │   │   ├── CounterList.vue         # 计数器列表
 │   │   │   ├── DataBackup.vue          # 数据备份与恢复（含旧 KV 迁移入口）
@@ -82,7 +83,8 @@
 │   ├── router/index.js         # 路由表
 │   ├── App.vue                 # 根组件（登录态 + OIDC 回调处理 + 全局 layout）
 │   ├── main.js                 # 入口
-│   └── style.css               # ⭐ 唯一全局 CSS（@theme + 基础样式）
+│   ├── style.css               # ⭐ 唯一全局 CSS（@theme + 主题映射 + 基础样式）
+│   └── theme.js                # 主题偏好读取、解析、应用与持久化
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
 ├── index.html
@@ -155,6 +157,7 @@
 
 - **唯一全局 CSS 入口**：[src/style.css](src/style.css)
 - **设计 Token 双声明**：颜色 / 间距等 Token 在 `style.css` 的 `@theme {}` 中声明的同时，必须在 [tailwind.config.js](tailwind.config.js) 的 `theme.extend.colors` 中保持一一对应（Tailwind v3 IntelliSense + `@apply` 语义解析依赖 config）
+- 公共按钮与表单控件视觉统一使用 `style.css` 的 `@layer components` 语义类；组件模板只补充尺寸与布局，不重复声明背景、边框、文字色、圆角和交互状态
 - 业务一次性样式**直接在模板写 Tailwind 原子类**，不再为此写 `<style scoped>`
 - `<style scoped>` 仅在以下场景使用：
   1. 复杂 `@keyframes` 动画
@@ -164,21 +167,32 @@
 
 ### 5.2 设计 Token
 
-**使用原则**：业务代码优先用语义化 Token（`bg-dark-900` / `text-primary` / `border-dark-700`），**不直接使用 Tailwind 默认调色板的中间色阶**（如 `bg-slate-700` / `text-zinc-400`）。
+**使用原则**：业务代码优先用语义化 Token（`bg-dark-900` / `text-primary` / `border-dark-700`），**不直接使用 Tailwind 默认调色板的中间色阶**（如 `bg-slate-700` / `text-zinc-400`）。历史 `dark-*` 名称继续保留作为自适应表面 Token，实际值由 `data-theme` 决定。
 
-| Token | 值 | 用途 |
-|---|---|---|
-| `dark-900` | `#141414` | 页面最底层背景（`body`） |
-| `dark-800` | `#1d1e1f` | 顶栏 / 卡片背景 |
-| `dark-700` | `#2b2d30` | 分割线 / 输入框背景 / 二级容器 |
-| `dark-600` | `#4C4D4F` | 边框 / 占位文本 |
-| `primary` | `#409eff` | 品牌主色（按钮 / 选中态 / 链接 hover） |
-| `primary-hover` | `#66b1ff` | 主色 hover 态 |
-| `primary-dark` | `#3a8ee6` | 主色加深态（渐变收尾色 / 标题 gradient） |
-| `success` / `success-hover` | `#22c55e` / `#16a34a` | 成功态实色按钮（如"添加""保存"绿色操作） |
-| `warning` / `warning-hover` | `#f59e0b` / `#d97706` | 警示态实色按钮（如"更新""覆盖"操作） |
-| `danger` / `danger-hover` | `#ef4444` / `#dc2626` | 危险态实色按钮（ConfirmModal 删除等） |
-| `gray-200` ~ `gray-500` | Tailwind 默认 | 文字三级（主 / 次 / 弱）；正文默认 `text-gray-200` |
+| Token | 暗色值 | 亮色值 | 用途 |
+|---|---|---|---|
+| `dark-900` | `#141414` | `#f4f6f8` | 页面最底层背景（`body`） |
+| `dark-800` | `#1d1e1f` | `#ffffff` | 顶栏 / 卡片背景 |
+| `dark-700` | `#2b2d30` | `#e5e7eb` | 分割线 / 二级容器 |
+| `dark-600` | `#4C4D4F` | `#c2c8d0` | 边框 / 占位文本 |
+| `content-strong` | `#f9fafb` | `#111827` | 404 渐变等需要明确强文字色的场景 |
+| `on-accent` | `#ffffff` | `#ffffff` | 主色 / 成功 / 警示 / 危险实色按钮上的固定白字 |
+| `control` | `#2b2d30` | `#ffffff` | 次级按钮与分段控件背景 |
+| `control-hover` | `#37393d` | `#f1f5f9` | 次级按钮与分段控件 hover |
+| `control-border` | `#4C4D4F` | `#cbd5e1` | 次级按钮与分段控件默认边框 |
+| `control-border-hover` | `#6b7280` | `#94a3b8` | 次级按钮与分段控件 hover 边框 |
+| `field` | `#141414` | `#ffffff` | 输入框、选择器与类输入条目背景 |
+| `field-disabled` | `#1d1e1f` | `#f1f5f9` | 禁用输入框背景 |
+| `field-border` | `#4C4D4F` | `#cbd5e1` | 输入框、选择器与类输入条目默认边框 |
+| `field-border-hover` | `#6b7280` | `#94a3b8` | 输入框、选择器与类输入条目 hover 边框 |
+| `grid-line` | `#ffffff0a` | `#0f172a0a` | 页面低对比度网格线 |
+| `primary` | `#409eff` | `#1d4ed8` | 品牌主色（按钮 / 选中态 / 链接 hover） |
+| `primary-hover` | `#66b1ff` | `#1e40af` | 主色 hover 态 |
+| `primary-dark` | `#3a8ee6` | `#1e3a8a` | 主色加深态（渐变收尾色 / 标题 gradient） |
+| `success` / `success-hover` | `#22c55e` / `#16a34a` | `#065f46` / `#064e3b` | 成功操作与状态色 |
+| `warning` / `warning-hover` | `#f59e0b` / `#d97706` | `#92400e` / `#78350f` | 警示操作与状态色 |
+| `danger` / `danger-hover` | `#ef4444` / `#dc2626` | `#b91c1c` / `#991b1b` | 危险操作与状态色 |
+| `gray-100` ~ `gray-600` | Tailwind 默认 | `#111827` ~ `#9ca3af` | 自适应文字层级；正文默认 `text-gray-200` |
 
 **状态色半透明用法（来自 Tailwind 默认调色板，规范保留）**：
 
@@ -188,14 +202,18 @@
 | 状态失败 | `bg-red-500/10 text-red-400 border border-red-500/20` |
 | 状态警告 | `bg-amber-500/10 text-amber-400 border border-amber-500/20` |
 
-> 实色按钮用 `bg-success/warning/danger` Token；半透明状态徽章保留使用 `green-500/10` 等 Tailwind 默认色（视为状态语义色，不算"硬编码"）。
+> 操作按钮与状态徽章均通过语义 Token 表达；半透明状态徽章保留使用 `green-500/10` 等 Tailwind 默认色（视为状态语义色，不算"硬编码"）。
 
 **禁止**在新代码中出现 `#1d1e1f` / `#409eff` 等硬编码色值（含 `rgba`），必须经 Token 引用。需要新色时**先加到 `style.css` 的 `@theme` 与 `tailwind.config.js`，再使用**。
 
 ### 5.3 主题模式
 
-- 本仓库**仅支持暗色模式**（`:root { color-scheme: dark; }`）；当前不需要 `dark:` 前缀切换
-- 暂不支持浅色模式；新增组件**不要**写 `dark:` 变体（除非未来引入 Light Theme 时统一改造）
+- 支持 `light` / `system` / `dark` 三种主题偏好，默认 `system`
+- `App.vue` 是主题状态单一信源；`theme.js` 负责读取、解析、应用与持久化，`ThemeSwitcher.vue` 只通过 props/emit 交互
+- 偏好写入 `localStorage.open_kounter_theme`；只允许 `light` / `system` / `dark`，无效或缺失值回退到 `system`
+- `<html data-theme>` 保存解析后的 `light` / `dark`，`<html data-theme-mode>` 保存用户选择；系统模式必须监听 `prefers-color-scheme` 变化并实时更新
+- 组件继续使用全局 Token，不在模板中成批堆叠 `dark:` 变体；亮色映射统一维护在 `style.css` 的 `:root[data-theme='light']`
+- 亮色下 `.text-white` 会映射为强文字色；实色品牌 / 状态按钮必须使用 `text-on-accent` 保持固定白字
 
 ### 5.4 响应式与断点
 
@@ -209,13 +227,18 @@
 |---|---|
 | 卡片容器 | `bg-dark-800 border border-dark-700/50 rounded-2xl shadow-lg shadow-dark-900/20` |
 | 顶栏（sticky） | `sticky top-0 z-40 bg-dark-800/80 backdrop-blur-xl border-b border-dark-700/50` |
-| 主操作按钮 | `bg-primary hover:bg-primary-hover text-white font-medium rounded-lg transition-all` |
-| 次操作按钮 | `text-gray-400 hover:text-white bg-dark-700/50 hover:bg-dark-700 border border-dark-600 rounded-lg transition-all` |
-| 成功操作按钮 | `bg-success hover:bg-success-hover text-white rounded-lg transition-colors` |
-| 警示操作按钮 | `bg-warning hover:bg-warning-hover text-white rounded-lg transition-colors` |
-| 危险操作按钮（轮廓） | `text-gray-400 hover:text-danger bg-dark-700/50 hover:bg-danger/10 border border-dark-600 hover:border-danger/50 rounded-lg` |
-| 危险操作按钮（实色，仅用于 ConfirmModal） | `bg-danger hover:bg-danger-hover text-white rounded-lg transition-colors` |
-| 输入框 | `bg-dark-700 border border-dark-600 focus:border-primary focus:ring-1 focus:ring-primary rounded-lg text-gray-200 placeholder:text-gray-500` |
+| 主操作按钮 | `button-primary` |
+| 次操作按钮 | `button-secondary` |
+| 成功操作按钮 | `button-success` |
+| 警示操作按钮 | `button-warning` |
+| 危险操作按钮（轮廓） | `button-danger` |
+| 危险操作按钮（实色，仅用于 ConfirmModal） | `button-danger-solid` |
+| 成功提示操作（轮廓） | `button-success-outline` |
+| 警示提示操作（轮廓） | `button-warning-outline` |
+| 普通输入框 | `form-control` |
+| 原生选择器 | `form-select` |
+| 紧凑按钮尺寸 | `button-compact`（固定 `h-8`、`text-xs`、`rounded-md`） |
+| 紧凑输入框尺寸 | `field-compact`（固定 `h-8`，移动端保留可读字号，桌面缩为 `text-sm`） |
 | 表格分割 | `divide-y divide-dark-700/50` |
 | 状态成功 | `bg-green-500/10 text-green-400 border border-green-500/20` |
 | 状态失败 | `bg-red-500/10 text-red-400 border border-red-500/20` |
@@ -249,6 +272,7 @@
 ### 6.2 状态与数据流
 
 - **登录态单一信源**：`App.vue` 的 `token` / `isLoggedIn` ref；通过 `<router-view :token :isLoggedIn @login>` 下发
+- **主题状态单一信源**：`App.vue` 的 `themeMode` ref；切换控件通过 `update:modelValue` 交给 `App.vue` 写入 `open_kounter_theme`
 - 子组件想要刷新登录态：`emit('login', newToken)` 冒泡到 `App.vue`，由 `App.vue` 写 `localStorage`
 - 子组件**不要**直接写 `localStorage.setItem('open_kounter_token', ...)`
 - 跨组件共享数据：优先 props / emit；多层共享用 `provide / inject`
@@ -493,8 +517,8 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 0**：Blob 主存储落地、KV 迁移工具完成
 - [x] **Phase 1**：Passkey 无密码登录
 - [x] **Phase 2**：OIDC 单点登录 + 登录页渐进式检测
-- [ ] **Phase 3**：浅色主题适配（引入 `dark:` 切换钩子，扩充 `@theme` Token 的浅色镜像）
-- [ ] **Phase 4**：抽离公共 UI 类（按钮 / 卡片 / 输入框）到 `@layer components`，减少模板原子类长串
+- [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
+- [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。
 
