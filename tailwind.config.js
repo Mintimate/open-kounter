@@ -13,6 +13,27 @@ export default {
           700: '#2b2d30',
           600: '#4C4D4F',
         },
+        content: {
+          strong: '#f9fafb',
+        },
+        on: {
+          accent: '#ffffff',
+        },
+        control: {
+          DEFAULT: '#2b2d30',
+          hover: '#37393d',
+          border: '#4C4D4F',
+          'border-hover': '#6b7280',
+        },
+        field: {
+          DEFAULT: '#141414',
+          disabled: '#1d1e1f',
+          border: '#4C4D4F',
+          'border-hover': '#6b7280',
+        },
+        grid: {
+          line: '#ffffff0a',
+        },
         primary: {
           DEFAULT: '#409eff',
           hover: '#66b1ff',

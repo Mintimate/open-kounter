@@ -6,6 +6,21 @@
   --color-dark-700: #2b2d30;
   --color-dark-600: #4C4D4F;
 
+  --color-content-strong: #f9fafb;
+  --color-on-accent: #ffffff;
+
+  --color-control: #2b2d30;
+  --color-control-hover: #37393d;
+  --color-control-border: #4C4D4F;
+  --color-control-border-hover: #6b7280;
+
+  --color-field: #141414;
+  --color-field-disabled: #1d1e1f;
+  --color-field-border: #4C4D4F;
+  --color-field-border-hover: #6b7280;
+
+  --color-grid-line: #ffffff0a;
+
   --color-primary: #409eff;
   --color-primary-hover: #66b1ff;
   --color-primary-dark: #3a8ee6;
@@ -24,6 +39,132 @@
   color-scheme: dark;
 }
 
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-dark-900: #f4f6f8;
+  --color-dark-800: #ffffff;
+  --color-dark-700: #e5e7eb;
+  --color-dark-600: #c2c8d0;
+
+  --color-content-strong: #111827;
+
+  --color-control: #ffffff;
+  --color-control-hover: #f1f5f9;
+  --color-control-border: #cbd5e1;
+  --color-control-border-hover: #94a3b8;
+
+  --color-field: #ffffff;
+  --color-field-disabled: #f1f5f9;
+  --color-field-border: #cbd5e1;
+  --color-field-border-hover: #94a3b8;
+
+  --color-grid-line: #0f172a0a;
+
+  --color-gray-100: #111827;
+  --color-gray-200: #1f2937;
+  --color-gray-300: #374151;
+  --color-gray-400: #4b5563;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #9ca3af;
+
+  --color-primary: #1d4ed8;
+  --color-primary-hover: #1e40af;
+  --color-primary-dark: #1e3a8a;
+
+  --color-success: #065f46;
+  --color-success-hover: #064e3b;
+  --color-danger: #b91c1c;
+  --color-danger-hover: #991b1b;
+  --color-warning: #92400e;
+  --color-warning-hover: #78350f;
+
+  --color-green-400: #15803d;
+  --color-red-400: #b91c1c;
+  --color-amber-400: #b45309;
+  --color-blue-400: #1d4ed8;
+  --color-emerald-300: #047857;
+}
+
 body {
-  @apply bg-dark-900 text-gray-200 font-sans antialiased;
+  @apply bg-dark-900 text-gray-200 font-sans antialiased transition-colors duration-300;
+}
+
+@layer components {
+  .app-grid-background {
+    background-color: var(--color-dark-900);
+    background-image:
+      linear-gradient(var(--color-grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px);
+    background-position: -1px -1px;
+    background-size: 32px 32px;
+  }
+
+  .button-primary,
+  .button-secondary,
+  .button-success,
+  .button-warning,
+  .button-danger,
+  .button-danger-solid,
+  .button-success-outline,
+  .button-warning-outline {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md border font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .button-primary {
+    @apply border-primary/40 bg-primary/15 text-primary hover:border-primary/60 hover:bg-primary/25;
+  }
+
+  .button-secondary {
+    @apply border-control-border bg-control text-gray-200 hover:border-control-border-hover hover:bg-control-hover;
+  }
+
+  .button-success {
+    @apply border-success/40 bg-success/15 text-success hover:border-success/60 hover:bg-success/25;
+  }
+
+  .button-warning {
+    @apply border-warning/40 bg-warning/15 text-warning hover:border-warning/60 hover:bg-warning/25;
+  }
+
+  .button-danger {
+    @apply border-danger/30 bg-danger/10 text-danger hover:border-danger/50 hover:bg-danger/20;
+  }
+
+  .button-danger-solid {
+    @apply border-danger bg-danger text-on-accent hover:border-danger-hover hover:bg-danger-hover;
+  }
+
+  .button-success-outline {
+    @apply border-success/30 bg-success/10 text-success hover:border-success/50 hover:bg-success/20;
+  }
+
+  .button-warning-outline {
+    @apply border-warning/30 bg-warning/10 text-warning hover:border-warning/50 hover:bg-warning/20;
+  }
+
+  .form-control,
+  .form-select {
+    @apply rounded-lg border border-field-border bg-field text-gray-200 transition-colors hover:border-field-border-hover focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:bg-field-disabled disabled:text-gray-500 disabled:hover:border-field-border;
+  }
+
+  .form-control {
+    @apply placeholder:text-gray-500;
+  }
+
+  .form-select {
+    @apply cursor-pointer;
+  }
+
+  .button-compact {
+    @apply h-8 rounded-md px-2.5 py-0 text-xs leading-none;
+  }
+
+  .field-compact {
+    @apply h-8 rounded-md px-2.5 py-0 text-base leading-none md:text-sm;
+  }
+}
+
+:root[data-theme='light'] .text-white {
+  color: var(--color-content-strong);
 }

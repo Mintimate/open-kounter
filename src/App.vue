@@ -1,6 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+
+import ThemeSwitcher from './components/common/ThemeSwitcher.vue'
+import { applyThemeMode, getStoredThemeMode, saveThemeMode } from './theme.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -8,8 +11,22 @@ const router = useRouter()
 const token = ref(localStorage.getItem('open_kounter_token') || '')
 const isLoggedIn = ref(false)
 const isLoading = ref(true)
+const themeMode = ref(getStoredThemeMode())
+const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
 const oidcMessage = ref('')
+
+const setThemeMode = (mode) => {
+  themeMode.value = mode
+  saveThemeMode(mode)
+  applyThemeMode(mode, systemThemeQuery.matches)
+}
+
+const handleSystemThemeChange = ({ matches }) => {
+  if (themeMode.value === 'system') {
+    applyThemeMode('system', matches)
+  }
+}
 
 const handleLogin = (newToken) => {
   token.value = newToken
@@ -27,6 +44,8 @@ const handleLogout = () => {
 const isNotFoundPage = computed(() => route.name === 'NotFound')
 
 onMounted(async () => {
+  systemThemeQuery.addEventListener('change', handleSystemThemeChange)
+
   // 等待路由就绪，防止 404 页面判定错误
   await router.isReady()
 
@@ -97,10 +116,18 @@ onMounted(async () => {
     isLoading.value = false
   }
 })
+
+onBeforeUnmount(() => {
+  systemThemeQuery.removeEventListener('change', handleSystemThemeChange)
+})
 </script>
 
 <template>
-  <div class="min-h-screen bg-dark-900 text-gray-200 font-sans selection:bg-primary selection:text-white">
+  <div class="app-grid-background min-h-screen text-gray-200 font-sans selection:bg-primary selection:text-white">
+    <div v-if="!isLoading && (!isLoggedIn || isNotFoundPage)" class="fixed right-4 top-4 z-[60]">
+      <ThemeSwitcher :model-value="themeMode" @update:model-value="setThemeMode" />
+    </div>
+
     <div v-if="isLoading" class="fixed inset-0 z-50 flex items-center justify-center bg-dark-900">
       <div class="flex flex-col items-center gap-4">
         <div class="w-12 h-12 border-4 border-primary/30 border-t-primary rounded-full animate-spin"></div>
@@ -122,18 +149,22 @@ onMounted(async () => {
               <h1 class="text-lg font-bold text-white tracking-tight leading-none group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-primary group-hover:to-purple-500 transition-all duration-300">
                 Open Kounter
               </h1>
-              <span class="text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mt-1">强一致 Blob 计数，简单可视化</span>
+              <span class="hidden text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mt-1 md:block">强一致 Blob 计数，简单可视化</span>
             </div>
           </div>
-          <button 
-            @click="handleLogout" 
-            class="group flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-400 hover:text-white bg-dark-700/50 hover:bg-red-500/10 border border-dark-600 hover:border-red-500/50 rounded-lg transition-all duration-200"
-          >
-            <span>退出登录</span>
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:translate-x-0.5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-            </svg>
-          </button>
+          <div class="flex items-center gap-2">
+            <ThemeSwitcher :model-value="themeMode" @update:model-value="setThemeMode" />
+            <button
+              class="button-secondary button-compact group sm:px-3"
+              title="退出登录"
+              @click="handleLogout"
+            >
+              <span class="hidden sm:inline">退出登录</span>
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:translate-x-0.5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013 3v1" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
       
