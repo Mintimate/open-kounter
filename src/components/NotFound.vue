@@ -32,7 +32,7 @@ onMounted(() => {
 
         <!-- 404 大字 -->
         <div class="relative mb-8">
-          <h1 class="text-[8rem] md:text-[10rem] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white/90 to-white/10 leading-none select-none drop-shadow-2xl">
+          <h1 class="text-[8rem] md:text-[10rem] font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-content-strong/90 to-content-strong/10 leading-none select-none drop-shadow-2xl">
             404
           </h1>
           <!-- 悬浮的星球装饰 -->
@@ -68,7 +68,7 @@ onMounted(() => {
             leave-from-class="transform scale-100 opacity-100 translate-y-0"
             leave-to-class="transform scale-95 opacity-0 translate-y-2"
           >
-            <div v-if="isHovering" class="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary text-white text-xs rounded-lg whitespace-nowrap shadow-lg">
+            <div v-if="isHovering" class="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary text-on-accent text-xs rounded-lg whitespace-nowrap shadow-lg">
               带我回家 🚀
               <div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 border-4 border-transparent border-t-primary"></div>
             </div>
@@ -90,7 +90,7 @@ onMounted(() => {
         <!-- 操作按钮 -->
         <button
           @click="goHome"
-          class="group relative inline-flex items-center justify-center px-8 py-3 bg-primary text-white font-semibold rounded-xl overflow-hidden transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_theme('colors.primary.DEFAULT')]"
+          class="group relative inline-flex items-center justify-center px-8 py-3 bg-primary text-on-accent font-semibold rounded-xl overflow-hidden transition-all duration-300 hover:scale-105 hover:shadow-[0_0_20px_theme('colors.primary.DEFAULT')]"
         >
           <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-200%] group-hover:animate-shimmer"></div>
           <span class="mr-2 transform transition-transform group-hover:-translate-x-1">
