@@ -115,7 +115,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 ├── cloud-functions/        # 主后端逻辑 (Blob API)
 │   └── api/
 │       ├── auth.js         # 认证逻辑
-│       ├── counter.js      # 核心计数器逻辑
+│       ├── counter.js      # 计数器读写、列表与统计聚合
 │       ├── init.js         # 初始化与迁移接口
 │       ├── passkey.js      # Passkey 相关逻辑
 │       └── oidc/           # OIDC 单点登录
@@ -131,13 +131,13 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   │   │   ├── ConfirmModal.vue         # 通用确认弹窗
 │   │   │   └── ThemeSwitcher.vue        # 三段式主题切换
 │   │   ├── dashboard/
+│   │   │   ├── AnalyticsOverview.vue    # 累计指标、热门页面与最近活跃
 │   │   │   ├── CounterList.vue          # 计数器列表
 │   │   │   ├── DataBackup.vue           # 数据备份与恢复
 │   │   │   ├── DomainConfig.vue         # 域名白名单配置
 │   │   │   ├── OidcManager.vue          # OIDC 绑定管理
 │   │   │   ├── PasskeyManager.vue       # Passkey 管理
-│   │   │   ├── SingleCounterManager.vue # 单个计数器管理
-│   │   │   └── TotalStats.vue           # 统计概览
+│   │   │   └── SingleCounterManager.vue # 单个计数器管理
 │   │   ├── Dashboard.vue   # 仪表盘主组件
 │   │   ├── Login.vue       # 登录组件
 │   │   └── NotFound.vue    # 404 页面
@@ -231,16 +231,48 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   {
     "action": "list",
     "page": 1,
-    "pageSize": 20
+    "pageSize": 20,
+    "query": "/posts/",
+    "sortBy": "count",
+    "sortOrder": "desc"
   }
   ```
+- **可选参数**:
+  - `query`: 按 Target Key 进行不区分大小写的包含匹配。
+  - `sortBy`: `target` / `count` / `created_at` / `updated_at`，默认 `updated_at`。
+  - `sortOrder`: `asc` / `desc`，默认 `desc`。
+- **响应说明**: `total` 为筛选后的数量，`allTotal` 为全部计数器数量。
 
-#### 4. 导出所有数据
+#### 4. 获取统计概览
+- **URL**: `POST /api/counter`
+- **Body**: `{ "action": "summary" }`
+- **响应**:
+  ```json
+  {
+    "code": 0,
+    "data": {
+      "sitePv": 12000,
+      "siteUv": 3500,
+      "totalCounters": 42,
+      "pageCounters": 40,
+      "staleCounters": 3,
+      "zeroCounters": 1,
+      "staleAfterDays": 30,
+      "latestUpdatedAt": 1700000000000,
+      "generatedAt": 1700000000000,
+      "topPages": [],
+      "recentlyActive": []
+    }
+  }
+  ```
+- **说明**: 直接聚合现有累计计数器，不新增 Blob Schema；热门页面与最近活跃均排除 `site-pv` 和 `site-uv`，各返回最多 8 条。
+
+#### 5. 导出所有数据
 - **URL**: `POST /api/counter`
 - **Body**: `{ "action": "export_all" }`
 - **响应**: 包含所有计数器数据和配置的 JSON 对象。
 
-#### 5. 导入数据
+#### 6. 导入数据
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
@@ -250,7 +282,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   }
   ```
 
-#### 6. 配置域名白名单
+#### 7. 配置域名白名单
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
