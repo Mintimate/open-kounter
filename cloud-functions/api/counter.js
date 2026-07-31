@@ -21,6 +21,12 @@ import {
 } from './_api.js'
 import { importLegacyBundle, migrateFromLegacy } from './_legacyMigration.js'
 
+const STALE_COUNTER_DAYS = 30
+const STALE_COUNTER_MS = STALE_COUNTER_DAYS * 24 * 60 * 60 * 1000
+const SUMMARY_LIST_LIMIT = 8
+const SITE_COUNTER_TARGETS = new Set(['site-pv', 'site-uv'])
+const SORT_FIELDS = new Set(['count', 'created_at', 'target', 'updated_at'])
+
 export async function onRequest(context) {
   const { request, env } = context
 
@@ -109,26 +115,37 @@ export async function onRequest(context) {
       return successResponse(request, { deleted: true, target })
     }
 
+    if (action === 'summary') {
+      await requireAuth(request, store, env)
+      const counters = await listCounterRecords(store)
+      return successResponse(request, createCounterSummary(counters))
+    }
+
     if (action === 'list') {
       await requireAuth(request, store, env)
       const page = Math.max(1, Number.parseInt(body.page, 10) || 1)
-      const pageSize = Math.max(1, Number.parseInt(body.pageSize, 10) || 20)
+      const pageSize = Math.min(100, Math.max(1, Number.parseInt(body.pageSize, 10) || 20))
+      const query = String(body.query || '').trim().toLocaleLowerCase()
+      const sortBy = SORT_FIELDS.has(body.sortBy) ? body.sortBy : 'updated_at'
+      const sortOrder = body.sortOrder === 'asc' ? 'asc' : 'desc'
       const counters = await listCounterRecords(store)
-      const total = counters.length
+      const filteredCounters = counters
+        .filter((item) => !query || item.target.toLocaleLowerCase().includes(query))
+        .sort(createCounterComparator(sortBy, sortOrder))
+      const total = filteredCounters.length
       const start = (page - 1) * pageSize
-      const items = counters.slice(start, start + pageSize).map((item) => ({
-        target: item.target,
-        count: item.time,
-        created_at: item.created_at,
-        updated_at: item.updated_at
-      }))
+      const items = filteredCounters.slice(start, start + pageSize).map(toCounterListItem)
 
       return successResponse(request, {
         items,
         total,
+        allTotal: counters.length,
         page,
         pageSize,
-        totalPages: Math.ceil(total / pageSize)
+        totalPages: Math.ceil(total / pageSize),
+        query,
+        sortBy,
+        sortOrder
       })
     }
 
@@ -299,6 +316,67 @@ async function incrementCountersBatch(store, requests) {
 async function replaceAllCounters(store, data) {
   await deleteJson(store, COUNTERS_DOC_KEY)
   return replaceAllCounterRecords(store, data.counters)
+}
+
+function createCounterSummary(counters, now = Date.now()) {
+  const sitePv = counters.find((item) => item.target === 'site-pv')?.time || 0
+  const siteUv = counters.find((item) => item.target === 'site-uv')?.time || 0
+  const pageCounters = counters.filter((item) => !SITE_COUNTER_TARGETS.has(item.target))
+  const latestUpdatedAt = counters.reduce(
+    (latest, item) => Math.max(latest, Number(item.updated_at) || 0),
+    0
+  )
+  const staleBefore = now - STALE_COUNTER_MS
+
+  const topPages = [...pageCounters]
+    .sort(createCounterComparator('count', 'desc'))
+    .slice(0, SUMMARY_LIST_LIMIT)
+    .map(toCounterListItem)
+  const recentlyActive = [...pageCounters]
+    .sort(createCounterComparator('updated_at', 'desc'))
+    .slice(0, SUMMARY_LIST_LIMIT)
+    .map(toCounterListItem)
+
+  return {
+    sitePv,
+    siteUv,
+    totalCounters: counters.length,
+    pageCounters: pageCounters.length,
+    staleCounters: counters.filter((item) => !item.updated_at || item.updated_at < staleBefore).length,
+    zeroCounters: counters.filter((item) => !item.time || item.time <= 0).length,
+    staleAfterDays: STALE_COUNTER_DAYS,
+    latestUpdatedAt,
+    generatedAt: now,
+    topPages,
+    recentlyActive
+  }
+}
+
+function createCounterComparator(sortBy, sortOrder) {
+  const direction = sortOrder === 'asc' ? 1 : -1
+
+  return (left, right) => {
+    if (sortBy === 'target') {
+      const targetResult = left.target.localeCompare(right.target)
+      return targetResult === 0 ? 0 : targetResult * direction
+    }
+
+    const leftValue = sortBy === 'count' ? Number(left.time) || 0 : Number(left[sortBy]) || 0
+    const rightValue = sortBy === 'count' ? Number(right.time) || 0 : Number(right[sortBy]) || 0
+    if (leftValue === rightValue) {
+      return left.target.localeCompare(right.target)
+    }
+    return (leftValue - rightValue) * direction
+  }
+}
+
+function toCounterListItem(item) {
+  return {
+    target: item.target,
+    count: item.time,
+    created_at: item.created_at,
+    updated_at: item.updated_at
+  }
 }
 
 async function checkOriginAllowed(request, store) {

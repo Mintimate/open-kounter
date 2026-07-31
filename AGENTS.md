@@ -52,7 +52,7 @@
 │       ├── _blobStore.js       # Blob Store 工厂 + Key 命名规则 + 读写工具
 │       ├── _legacyMigration.js # 旧 KV → Blob 迁移逻辑
 │       ├── auth.js             # Token / OIDC session 校验
-│       ├── counter.js          # 计数器核心（inc / batch_inc / set / delete / list / export / import / set_config）
+│       ├── counter.js          # 计数器核心（inc / batch_inc / set / delete / list / summary / export / import / set_config）
 │       ├── init.js             # 首次初始化与迁移触发
 │       ├── passkey.js          # Passkey 注册 / 登录 / 管理
 │       └── oidc/
@@ -68,13 +68,13 @@
 │   │   │   ├── ConfirmModal.vue        # 通用确认弹窗
 │   │   │   └── ThemeSwitcher.vue       # 亮色 / 系统 / 暗色三段式切换
 │   │   ├── dashboard/
+│   │   │   ├── AnalyticsOverview.vue   # 累计指标、热门页面与最近活跃
 │   │   │   ├── CounterList.vue         # 计数器列表
 │   │   │   ├── DataBackup.vue          # 数据备份与恢复（含旧 KV 迁移入口）
 │   │   │   ├── DomainConfig.vue        # 域名白名单配置
 │   │   │   ├── OidcManager.vue         # OIDC 绑定管理
 │   │   │   ├── PasskeyManager.vue      # Passkey 管理
-│   │   │   ├── SingleCounterManager.vue# 单个计数器管理
-│   │   │   └── TotalStats.vue          # 统计概览
+│   │   │   └── SingleCounterManager.vue# 单个计数器管理
 │   │   ├── Dashboard.vue       # 仪表盘主组件
 │   │   ├── Login.vue           # 登录组件（Token / Passkey / OIDC 渐进式）
 │   │   └── NotFound.vue        # 404

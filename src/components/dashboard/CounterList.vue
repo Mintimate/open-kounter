@@ -1,17 +1,22 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 import ConfirmModal from '../common/ConfirmModal.vue'
 
 const props = defineProps(['token'])
-const emit = defineEmits(['update:totalCount'])
+const emit = defineEmits(['changed'])
 
 const counters = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
 const totalPages = ref(0)
+const totalItems = ref(0)
+const allTotal = ref(0)
+const searchQuery = ref('')
+const sortOption = ref('updated_at:desc')
 const loading = ref(false)
 const error = ref('')
+let searchTimer = null
 
 // Edit state
 const showEditModal = ref(false)
@@ -28,8 +33,9 @@ const deleteLoading = ref(false)
 const loadCounters = async () => {
   loading.value = true
   error.value = ''
-  
+
   try {
+    const [sortBy, sortOrder] = sortOption.value.split(':')
     const res = await fetch('/api/counter', {
       method: 'POST',
       headers: {
@@ -39,16 +45,25 @@ const loadCounters = async () => {
       body: JSON.stringify({
         action: 'list',
         page: currentPage.value,
-        pageSize: pageSize.value
+        pageSize: pageSize.value,
+        query: searchQuery.value,
+        sortBy,
+        sortOrder
       })
     })
-    
+
     const data = await res.json()
-    
+
     if (data.code === 0) {
       counters.value = data.data.items
       totalPages.value = data.data.totalPages
-      emit('update:totalCount', data.data.total)
+      totalItems.value = data.data.total
+      allTotal.value = data.data.allTotal
+
+      if (totalPages.value > 0 && currentPage.value > totalPages.value) {
+        currentPage.value = totalPages.value
+        await loadCounters()
+      }
     } else {
       error.value = data.message
     }
@@ -60,6 +75,11 @@ const loadCounters = async () => {
 }
 
 const handlePageSizeChange = () => {
+  currentPage.value = 1
+  loadCounters()
+}
+
+const handleSortChange = () => {
   currentPage.value = 1
   loadCounters()
 }
@@ -93,6 +113,7 @@ const confirmDelete = async () => {
     if (data.code === 0) {
       showDeleteModal.value = false
       deletingTarget.value = ''
+      emit('changed')
       loadCounters()
     } else {
       error.value = data.message
@@ -138,6 +159,7 @@ const updateCounter = async () => {
 
     if (data.code === 0) {
       showEditModal.value = false
+      emit('changed')
       loadCounters()
     } else {
       editError.value = data.message || '更新失败'
@@ -164,6 +186,18 @@ onMounted(() => {
   loadCounters()
 })
 
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+watch(searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    currentPage.value = 1
+    loadCounters()
+  }, 300)
+})
+
 defineExpose({ loadCounters })
 </script>
 
@@ -175,12 +209,49 @@ defineExpose({ loadCounters })
       </div>
     </Transition>
 
-    <div class="p-4 border-b border-dark-700 flex justify-between items-center bg-dark-800/50">
-      <h3 class="text-base font-semibold text-white">计数器列表</h3>
-      <div class="flex items-center gap-2">
-        <select 
-          v-model="pageSize" 
+    <div class="flex flex-col gap-3 border-b border-dark-700 bg-dark-800/50 p-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h3 class="text-base font-semibold text-white">计数器列表</h3>
+          <p class="mt-0.5 text-xs text-gray-500">
+            {{ searchQuery ? `${totalItems} 条匹配` : `共 ${allTotal} 条` }}
+          </p>
+        </div>
+        <button
+          @click="loadCounters"
+          :disabled="loading"
+          class="button-secondary button-compact shrink-0"
+        >
+          {{ loading ? '加载中...' : '刷新' }}
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <input
+          v-model="searchQuery"
+          type="search"
+          placeholder="搜索 Target Key"
+          class="form-control field-compact min-w-0"
+        />
+        <select
+          v-model="sortOption"
+          @change="handleSortChange"
+          aria-label="排序方式"
+          class="form-select field-compact min-w-36"
+        >
+          <option value="updated_at:desc">最近更新</option>
+          <option value="updated_at:asc">最早更新</option>
+          <option value="count:desc">计数从高到低</option>
+          <option value="count:asc">计数从低到高</option>
+          <option value="target:asc">Key A-Z</option>
+          <option value="target:desc">Key Z-A</option>
+          <option value="created_at:desc">最近创建</option>
+          <option value="created_at:asc">最早创建</option>
+        </select>
+        <select
+          v-model="pageSize"
           @change="handlePageSizeChange"
+          aria-label="每页条数"
           class="form-select field-compact"
         >
           <option :value="10">10 条/页</option>
@@ -188,13 +259,6 @@ defineExpose({ loadCounters })
           <option :value="50">50 条/页</option>
           <option :value="100">100 条/页</option>
         </select>
-        <button 
-          @click="loadCounters" 
-          :disabled="loading"
-          class="button-secondary button-compact"
-        >
-          {{ loading ? '加载中...' : '刷新' }}
-        </button>
       </div>
     </div>
 
@@ -238,7 +302,7 @@ defineExpose({ loadCounters })
             </tr>
           <tr v-if="counters.length === 0 && !loading">
             <td colspan="5" class="px-4 py-8 text-center text-gray-500 text-xs">
-              暂无数据。计数器将在第一次调用 increment 时自动创建。
+              {{ searchQuery ? '没有匹配的计数器。' : '暂无数据。计数器将在第一次调用 increment 时自动创建。' }}
             </td>
           </tr>
         </tbody>
@@ -246,7 +310,7 @@ defineExpose({ loadCounters })
     </div>
     
     <!-- Pagination -->
-    <div v-if="counters.length > 0" class="px-4 py-3 border-t border-dark-700 flex justify-center items-center gap-4">
+    <div v-if="totalItems > 0" class="px-4 py-3 border-t border-dark-700 flex justify-center items-center gap-4">
       <button 
         class="px-2 py-1 text-xs text-gray-400 hover:text-gray-200 disabled:opacity-30 disabled:hover:text-gray-400"
         @click="goToPage(currentPage - 1)" 

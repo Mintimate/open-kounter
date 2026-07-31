@@ -1,63 +1,68 @@
 <script setup>
 import { ref } from 'vue'
 
+import AnalyticsOverview from './dashboard/AnalyticsOverview.vue'
 import CounterList from './dashboard/CounterList.vue'
 import DataBackup from './dashboard/DataBackup.vue'
 import DomainConfig from './dashboard/DomainConfig.vue'
 import OidcManager from './dashboard/OidcManager.vue'
 import PasskeyManager from './dashboard/PasskeyManager.vue'
 import SingleCounterManager from './dashboard/SingleCounterManager.vue'
-import TotalStats from './dashboard/TotalStats.vue'
 
 defineProps(['token'])
 
-const totalCount = ref(0)
+const analyticsOverviewRef = ref(null)
 const counterListRef = ref(null)
 const domainConfigRef = ref(null)
 
 const handleRefreshList = () => {
   counterListRef.value?.loadCounters()
+  analyticsOverviewRef.value?.loadSummary()
+}
+
+const handleCounterChanged = () => {
+  analyticsOverviewRef.value?.loadSummary()
 }
 
 const handleFullRefresh = () => {
-  counterListRef.value?.loadCounters()
+  handleRefreshList()
   domainConfigRef.value?.loadConfig()
 }
 </script>
 
 <template>
-  <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
-    <!-- 左侧：列表 (3/4) -->
-    <div class="lg:col-span-3">
-      <CounterList 
-        ref="counterListRef" 
-        :token="token" 
-        @update:totalCount="totalCount = $event" 
-      />
-    </div>
+  <div class="space-y-5">
+    <AnalyticsOverview ref="analyticsOverviewRef" :token="token" />
 
-    <!-- 右侧：工具栏 (1/4) -->
-    <div class="space-y-4">
-      <TotalStats :totalCount="totalCount" />
-      
-      <SingleCounterManager 
-        :token="token" 
-        @refresh="handleRefreshList" 
-      />
+    <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-4">
+      <div class="lg:col-span-3">
+        <CounterList
+          ref="counterListRef"
+          :token="token"
+          @changed="handleCounterChanged"
+        />
+      </div>
 
-      <PasskeyManager :token="token" />
+      <div class="space-y-4">
+        <SingleCounterManager
+          :token="token"
+          @refresh="handleRefreshList"
+        />
 
-      <OidcManager :token="token" />
-      
-      <DomainConfig 
-        ref="domainConfigRef" 
-        :token="token" 
-      />
-      
-      <DataBackup 
-        :token="token" 
-        @refresh="handleFullRefresh" 
-      />
+        <PasskeyManager :token="token" />
+
+        <OidcManager :token="token" />
+
+        <DomainConfig
+          ref="domainConfigRef"
+          :token="token"
+        />
+
+        <DataBackup
+          :token="token"
+          @refresh="handleFullRefresh"
+        />
+      </div>
     </div>
   </div>
 </template>
