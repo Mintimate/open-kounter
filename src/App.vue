@@ -1,12 +1,17 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { useI18n } from 'vue-i18n'
+
+import LanguageSwitcher from './components/common/LanguageSwitcher.vue'
 import ThemeSwitcher from './components/common/ThemeSwitcher.vue'
+import { saveLocale } from './i18n.js'
 import { applyThemeMode, getStoredThemeMode, saveThemeMode } from './theme.js'
 
 const route = useRoute()
 const router = useRouter()
+const { locale, t } = useI18n()
 
 const token = ref(localStorage.getItem('open_kounter_token') || '')
 const isLoggedIn = ref(false)
@@ -15,6 +20,15 @@ const themeMode = ref(getStoredThemeMode())
 const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
 const oidcMessage = ref('')
+const oidcMessageType = ref('error')
+
+watchEffect(() => {
+  document.title = t('app.title')
+})
+
+const setLocale = (newLocale) => {
+  locale.value = saveLocale(newLocale)
+}
 
 const setThemeMode = (mode) => {
   themeMode.value = mode
@@ -61,13 +75,15 @@ onMounted(async () => {
   }
 
   if (oidcError) {
-    oidcMessage.value = `OIDC 错误: ${decodeURIComponent(oidcError)}`
+    oidcMessage.value = t('app.oidcError', { message: decodeURIComponent(oidcError) })
+    oidcMessageType.value = 'error'
     isLoading.value = false
     return
   }
 
   if (oidcBound === 'true') {
-    oidcMessage.value = 'OIDC 身份绑定成功！'
+    oidcMessage.value = t('app.oidcBindSuccess')
+    oidcMessageType.value = 'success'
     // 绑定成功后，用户应该还是已登录状态（token 在 localStorage 中）
   }
 
@@ -85,11 +101,13 @@ onMounted(async () => {
         isLoading.value = false
         return
       } else {
-        oidcMessage.value = data.message || 'OIDC 登录失败'
+        oidcMessage.value = data.message || t('app.oidcLoginFailed')
+        oidcMessageType.value = 'error'
       }
     } catch (e) {
       console.error('OIDC session verify error:', e)
-      oidcMessage.value = 'OIDC 登录验证失败'
+      oidcMessage.value = t('app.oidcVerifyFailed')
+      oidcMessageType.value = 'error'
     }
   }
   
@@ -124,14 +142,15 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-grid-background min-h-screen text-gray-200 font-sans selection:bg-primary selection:text-white">
-    <div v-if="!isLoading && (!isLoggedIn || isNotFoundPage)" class="fixed right-4 top-4 z-[60]">
+    <div v-if="!isLoading && (!isLoggedIn || isNotFoundPage)" class="fixed right-4 top-4 z-[60] flex items-center gap-2">
+      <LanguageSwitcher @change="setLocale" />
       <ThemeSwitcher :model-value="themeMode" @update:model-value="setThemeMode" />
     </div>
 
     <div v-if="isLoading" class="fixed inset-0 z-50 flex items-center justify-center bg-dark-900">
       <div class="flex flex-col items-center gap-4">
         <div class="w-12 h-12 border-4 border-primary/30 border-t-primary rounded-full animate-spin"></div>
-        <div class="text-gray-400 text-sm animate-pulse">Loading...</div>
+        <div class="text-gray-400 text-sm animate-pulse">{{ t('app.loading') }}</div>
       </div>
     </div>
 
@@ -149,17 +168,18 @@ onBeforeUnmount(() => {
               <h1 class="text-lg font-bold text-white tracking-tight leading-none group-hover:text-transparent group-hover:bg-clip-text group-hover:bg-gradient-to-r group-hover:from-primary group-hover:to-purple-500 transition-all duration-300">
                 Open Kounter
               </h1>
-              <span class="hidden text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mt-1 md:block">强一致 Blob 计数，简单可视化</span>
+              <span class="hidden text-[10px] text-gray-500 font-medium uppercase tracking-wider leading-none mt-1 md:block">{{ t('app.slogan') }}</span>
             </div>
           </div>
           <div class="flex items-center gap-2">
+            <LanguageSwitcher @change="setLocale" />
             <ThemeSwitcher :model-value="themeMode" @update:model-value="setThemeMode" />
             <button
               class="button-secondary button-compact group sm:px-3"
-              title="退出登录"
+              :title="t('app.logout')"
               @click="handleLogout"
             >
-              <span class="hidden sm:inline">退出登录</span>
+              <span class="hidden sm:inline">{{ t('app.logout') }}</span>
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 group-hover:translate-x-0.5 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013 3v1" />
               </svg>
@@ -173,9 +193,9 @@ onBeforeUnmount(() => {
         <div 
           v-if="oidcMessage && !isLoggedIn" 
           class="mb-6 max-w-md mx-auto p-4 rounded-xl text-sm text-center flex items-center justify-center gap-2"
-          :class="oidcMessage.includes('成功') ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'"
+          :class="oidcMessageType === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'"
         >
-          <svg v-if="oidcMessage.includes('成功')" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg v-if="oidcMessageType === 'success'" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -201,20 +221,22 @@ onBeforeUnmount(() => {
 
       <footer v-if="!isNotFoundPage" class="mt-auto text-center border-t border-dark-700/50 pt-8 pb-8 bg-dark-900/50 backdrop-blur-sm">
         <div class="flex justify-center items-center gap-6 mb-4">
-          <a href="https://github.com/Mintimate/open-kounter" target="_blank" class="flex items-center text-sm font-medium text-gray-400 hover:text-primary transition-colors">
+          <a href="https://github.com/Mintimate/open-kounter" target="_blank" rel="noopener noreferrer" class="flex items-center text-sm font-medium text-gray-400 hover:text-primary transition-colors">
             <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" /></svg>
             GitHub
           </a>
           <span class="text-dark-600">|</span>
-          <a href="https://cnb.cool/Mintimate/tool-forge/open-kounter" target="_blank" class="flex items-center text-sm font-medium text-gray-400 hover:text-primary transition-colors">
+          <a href="https://cnb.cool/Mintimate/tool-forge/open-kounter" target="_blank" rel="noopener noreferrer" class="flex items-center text-sm font-medium text-gray-400 hover:text-primary transition-colors">
             <svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
             CNB
           </a>
         </div>
         <p class="text-sm text-gray-500">
-          Designed by <a href="https://www.mintimate.cn" target="_blank" class="font-medium text-gray-400 hover:text-primary transition-colors">Mintimate</a>
+          <i18n-t keypath="footer.designedBy" tag="span">
+            <template #name><a href="https://www.mintimate.cn" target="_blank" rel="noopener noreferrer" class="font-medium text-gray-400 hover:text-primary transition-colors">Mintimate</a></template>
+          </i18n-t>
           <span class="mx-2">·</span>
-          Powered by EdgeOne Makers
+          {{ t('footer.poweredBy', { name: 'EdgeOne Makers' }) }}
         </p>
       </footer>
     </template>

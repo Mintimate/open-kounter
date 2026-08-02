@@ -1,49 +1,50 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 
+import { useI18n } from 'vue-i18n'
+
 const props = defineProps(['token'])
+const { locale, t } = useI18n()
 
 const summary = ref(null)
 const loading = ref(false)
 const error = ref('')
 
-const numberFormatter = new Intl.NumberFormat('zh-CN')
-
 const metricCards = computed(() => [
   {
-    label: '累计 PV',
+    label: t('analytics.pv'),
     value: summary.value?.sitePv || 0,
-    unit: '次',
+    unit: t('analytics.timesUnit'),
     valueClass: 'text-primary'
   },
   {
-    label: '累计 UV',
+    label: t('analytics.uv'),
     value: summary.value?.siteUv || 0,
-    unit: '人次',
+    unit: t('analytics.peopleUnit'),
     valueClass: 'text-success'
   },
   {
-    label: '页面计数器',
+    label: t('analytics.pageCounters'),
     value: summary.value?.pageCounters || 0,
-    unit: '个',
+    unit: t('analytics.countUnit'),
     valueClass: 'text-white'
   },
   {
-    label: '全部计数器',
+    label: t('analytics.allCounters'),
     value: summary.value?.totalCounters || 0,
-    unit: '个',
+    unit: t('analytics.countUnit'),
     valueClass: 'text-white'
   },
   {
-    label: '30 天未活跃',
+    label: t('analytics.staleCounters'),
     value: summary.value?.staleCounters || 0,
-    unit: '个',
+    unit: t('analytics.countUnit'),
     valueClass: 'text-warning'
   },
   {
-    label: '零值计数器',
+    label: t('analytics.zeroCounters'),
     value: summary.value?.zeroCounters || 0,
-    unit: '个',
+    unit: t('analytics.countUnit'),
     valueClass: 'text-danger'
   }
 ])
@@ -71,7 +72,7 @@ const loadSummary = async () => {
     if (data.code === 0) {
       summary.value = data.data
     } else {
-      error.value = data.message || '统计概览加载失败'
+      error.value = data.message || t('analytics.loadFailed')
     }
   } catch (e) {
     error.value = e.message
@@ -80,11 +81,11 @@ const loadSummary = async () => {
   }
 }
 
-const formatNumber = (value) => numberFormatter.format(Number(value) || 0)
+const formatNumber = (value) => new Intl.NumberFormat(locale.value).format(Number(value) || 0)
 
 const formatDate = (timestamp) => {
   if (!timestamp) return '-'
-  return new Date(timestamp).toLocaleString()
+  return new Date(timestamp).toLocaleString(locale.value)
 }
 
 const getBarWidth = (count) => {
@@ -102,9 +103,9 @@ defineExpose({ loadSummary })
   <section class="space-y-3" aria-labelledby="analytics-overview-title">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <h2 id="analytics-overview-title" class="text-base font-semibold text-white">统计概览</h2>
+        <h2 id="analytics-overview-title" class="text-base font-semibold text-white">{{ t('analytics.overview') }}</h2>
         <p class="mt-0.5 text-xs text-gray-500">
-          最后写入：{{ formatDate(summary?.latestUpdatedAt) }}
+          {{ t('analytics.lastWrite', { date: formatDate(summary?.latestUpdatedAt) }) }}
         </p>
       </div>
       <button
@@ -113,7 +114,7 @@ defineExpose({ loadSummary })
         :disabled="loading"
         @click="loadSummary"
       >
-        {{ loading ? '加载中...' : '刷新概览' }}
+        {{ loading ? t('common.loading') : t('analytics.refresh') }}
       </button>
     </div>
 
@@ -140,7 +141,7 @@ defineExpose({ loadSummary })
     <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
       <div class="overflow-hidden rounded-lg border border-dark-700/60 bg-dark-800 shadow-sm">
         <div class="border-b border-dark-700/60 px-4 py-3">
-          <h3 class="text-sm font-semibold text-white">热门页面</h3>
+          <h3 class="text-sm font-semibold text-white">{{ t('analytics.topPages') }}</h3>
         </div>
         <div v-if="summary?.topPages?.length" class="divide-y divide-dark-700/50">
           <div v-for="item in summary.topPages" :key="item.target" class="relative px-4 py-2.5">
@@ -156,12 +157,12 @@ defineExpose({ loadSummary })
             </div>
           </div>
         </div>
-        <div v-else class="px-4 py-8 text-center text-xs text-gray-500">暂无页面计数</div>
+        <div v-else class="px-4 py-8 text-center text-xs text-gray-500">{{ t('analytics.noPageViews') }}</div>
       </div>
 
       <div class="overflow-hidden rounded-lg border border-dark-700/60 bg-dark-800 shadow-sm">
         <div class="border-b border-dark-700/60 px-4 py-3">
-          <h3 class="text-sm font-semibold text-white">最近活跃</h3>
+          <h3 class="text-sm font-semibold text-white">{{ t('analytics.recentActivity') }}</h3>
         </div>
         <div v-if="summary?.recentlyActive?.length" class="divide-y divide-dark-700/50">
           <div
@@ -178,7 +179,7 @@ defineExpose({ loadSummary })
             </div>
           </div>
         </div>
-        <div v-else class="px-4 py-8 text-center text-xs text-gray-500">暂无活跃页面</div>
+        <div v-else class="px-4 py-8 text-center text-xs text-gray-500">{{ t('analytics.noActivePages') }}</div>
       </div>
     </div>
   </section>

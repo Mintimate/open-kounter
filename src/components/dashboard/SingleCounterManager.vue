@@ -1,10 +1,13 @@
 <script setup>
 import { ref } from 'vue'
 
+import { useI18n } from 'vue-i18n'
+
 import ConfirmModal from '../common/ConfirmModal.vue'
 
 const props = defineProps(['token'])
 const emit = defineEmits(['refresh'])
+const { t } = useI18n()
 
 const target = ref('')
 const value = ref('')
@@ -71,7 +74,7 @@ const handleGet = () => {
 const handleSet = () => {
   if (!target.value) return
   if (value.value === '' || value.value === null) {
-    singleError.value = '请输入有效的数值'
+    singleError.value = t('singleCounter.invalidValue')
     return
   }
   callApi('set', { value: parseInt(value.value) })
@@ -95,8 +98,8 @@ const confirmDelete = async () => {
 
 <template>
   <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
-    <h3 class="text-base font-semibold text-white mb-1">管理单个计数器</h3>
-    <p class="text-xs text-gray-500 mb-3">查询、修改或删除指定 Key</p>
+    <h3 class="text-base font-semibold text-white mb-1">{{ t('singleCounter.title') }}</h3>
+    <p class="text-xs text-gray-500 mb-3">{{ t('singleCounter.description') }}</p>
     
     <div class="space-y-2">
       <div>
@@ -111,7 +114,7 @@ const confirmDelete = async () => {
             :disabled="singleLoading" 
             class="button-primary button-compact w-full min-w-16 shrink-0 whitespace-nowrap sm:w-auto"
           >
-            查询
+            {{ t('singleCounter.query') }}
           </button>
         </div>
       </div>
@@ -129,7 +132,7 @@ const confirmDelete = async () => {
             :disabled="singleLoading" 
             class="button-warning button-compact w-full min-w-16 shrink-0 whitespace-nowrap sm:w-auto"
           >
-            更新
+            {{ t('common.update') }}
           </button>
         </div>
       </div>
@@ -140,7 +143,7 @@ const confirmDelete = async () => {
           :disabled="singleLoading" 
           class="button-danger button-compact w-full"
         >
-          删除此计数器
+          {{ t('singleCounter.deleteButton') }}
         </button>
       </div>
 
@@ -156,17 +159,17 @@ const confirmDelete = async () => {
 
     <ConfirmModal
       :show="showDeleteModal"
-      title="删除计数器"
+      :title="t('counterList.deleteTitle')"
       variant="danger"
       :loading="deleteLoading"
-      confirm-text="确认删除"
+      :confirm-text="t('counterList.deleteConfirm')"
       @confirm="confirmDelete"
       @cancel="showDeleteModal = false"
       @update:show="showDeleteModal = $event"
     >
-      <p class="text-sm text-gray-400">
-        确定要删除计数器 <span class="font-mono text-primary">{{ target }}</span> 吗？该操作不可恢复。
-      </p>
+      <i18n-t keypath="counterList.deleteDescription" tag="p" class="text-sm text-gray-400">
+        <template #target><span class="font-mono text-primary">{{ target }}</span></template>
+      </i18n-t>
     </ConfirmModal>
   </div>
 </template>

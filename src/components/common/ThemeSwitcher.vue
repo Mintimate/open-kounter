@@ -1,5 +1,7 @@
 <script setup>
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   modelValue: {
@@ -9,12 +11,13 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
+const { t } = useI18n()
 
-const options = [
-  { value: 'light', label: '亮色' },
-  { value: 'system', label: '跟随系统' },
-  { value: 'dark', label: '暗色' }
-]
+const options = computed(() => [
+  { value: 'light', label: t('theme.light') },
+  { value: 'system', label: t('theme.system') },
+  { value: 'dark', label: t('theme.dark') }
+])
 
 const optionButtons = ref([])
 
@@ -23,7 +26,7 @@ const selectOption = (value) => {
 }
 
 const handleKeydown = async (event, currentIndex) => {
-  const lastIndex = options.length - 1
+  const lastIndex = options.value.length - 1
   let nextIndex = currentIndex
 
   if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
@@ -39,7 +42,7 @@ const handleKeydown = async (event, currentIndex) => {
   }
 
   event.preventDefault()
-  selectOption(options[nextIndex].value)
+  selectOption(options.value[nextIndex].value)
   await nextTick()
   optionButtons.value[nextIndex]?.focus()
 }
@@ -49,7 +52,7 @@ const handleKeydown = async (event, currentIndex) => {
   <div
     class="inline-flex h-8 items-center gap-0.5 rounded-md border border-control-border bg-control px-0.5 shadow-lg shadow-dark-900/10 backdrop-blur-xl"
     role="radiogroup"
-    aria-label="界面主题"
+    :aria-label="t('theme.ariaLabel')"
   >
     <button
       v-for="option in options"

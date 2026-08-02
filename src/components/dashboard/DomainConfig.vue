@@ -1,7 +1,10 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 
+import { useI18n } from 'vue-i18n'
+
 const props = defineProps(['token'])
+const { t } = useI18n()
 
 const allowedDomains = ref([])
 const newDomain = ref('')
@@ -60,7 +63,7 @@ const saveConfig = async () => {
     const data = await res.json()
 
     if (data.code === 0) {
-      configSuccess.value = '配置已保存'
+      configSuccess.value = t('domain.saved')
       setTimeout(() => {
         configSuccess.value = ''
       }, 2000)
@@ -95,12 +98,12 @@ defineExpose({ loadConfig })
 
 <template>
   <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
-    <h3 class="text-base font-semibold text-white mb-1">域名白名单</h3>
-    <p class="text-xs text-gray-500 mb-3">配置允许调用的来源</p>
+    <h3 class="text-base font-semibold text-white mb-1">{{ t('domain.title') }}</h3>
+    <p class="text-xs text-gray-500 mb-3">{{ t('domain.description') }}</p>
     
     <div class="mb-3 rounded-md border border-primary/20 bg-primary/10 px-3 py-2">
       <p class="text-xs leading-relaxed text-primary">
-        留空允许所有。支持通配符 <code>*</code>。
+        {{ t('domain.emptyHint') }}
       </p>
     </div>
 
@@ -117,7 +120,7 @@ defineExpose({ loadConfig })
           :disabled="configLoading" 
           class="button-success button-compact w-full min-w-16 shrink-0 sm:w-auto"
         >
-          添加
+          {{ t('common.add') }}
         </button>
       </div>
 
@@ -127,8 +130,8 @@ defineExpose({ loadConfig })
           <button
             type="button"
             class="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-danger/10 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/30"
-            :aria-label="`移除域名 ${domain}`"
-            :title="`移除 ${domain}`"
+            :aria-label="t('domain.remove', { domain })"
+            :title="t('domain.remove', { domain })"
             @click="removeDomain(index)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -137,7 +140,7 @@ defineExpose({ loadConfig })
           </button>
         </div>
         <div v-if="allowedDomains.length === 0" class="text-center py-2 text-xs text-gray-600">
-          未配置（允许所有）
+          {{ t('domain.allAllowed') }}
         </div>
       </div>
 
@@ -146,7 +149,7 @@ defineExpose({ loadConfig })
         :disabled="configLoading" 
         class="button-secondary button-compact mt-1 w-full"
       >
-        {{ configLoading ? '保存中...' : '保存配置' }}
+        {{ configLoading ? t('common.saving') : t('domain.save') }}
       </button>
 
       <div v-if="configSuccess" class="text-xs text-success mt-1">{{ configSuccess }}</div>

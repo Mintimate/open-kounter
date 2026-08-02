@@ -31,6 +31,7 @@
   - **Vue 3.3+**，统一使用 Composition API `<script setup>`，**禁止 Options API**
   - **JavaScript**（本仓库不使用 TypeScript；需要类型提示用 JSDoc）
   - **Vue Router 4**（仅 `Home` + `NotFound`，登录态由 `App.vue` 控制）
+  - **Vue I18n 11**（简体中文 / 英文；默认 `zh-CN`，语言资源集中在 `src/locales/`）
   - **Tailwind v3**（保留 `tailwind.config.js`；同时使用 `@theme {}` 块在 `style.css` 中声明设计 Token）
   - **Vite 7**
   - **原生 `fetch`**（不引入 axios，统一调用 `/api/*` 与 `/legacy-api/*`）
@@ -38,7 +39,7 @@
   - **EdgeOne Pages Cloud Functions**（`cloud-functions/api/**.js`）：处理认证、计数器、Passkey、OIDC、初始化与迁移
   - **EdgeOne Pages Edge Functions**（`edge-functions/legacy-api/**.js`）：仅用于读取旧版 `OPEN_KOUNTER` KV 命名空间，导出供 Blob 导入
   - **Blob Store**：通过 `@edgeone/pages-blob` 创建，默认 store 名 `open-kounter`，可经 `OPEN_KOUNTER_BLOB_STORE` 覆盖
-- **状态管理**：本仓库**不引入 Pinia / Vuex**。组件间状态优先使用 props/emit；登录态保存在 `App.vue` 的 `ref` 中并下发；持久化仅写 `localStorage` 的 `open_kounter_token` 与非敏感主题偏好 `open_kounter_theme`
+- **状态管理**：本仓库**不引入 Pinia / Vuex**。组件间状态优先使用 props/emit；登录态保存在 `App.vue` 的 `ref` 中并下发；持久化仅写 `localStorage` 的 `open_kounter_token`、非敏感主题偏好 `open_kounter_theme` 与语言偏好 `open_kounter_locale`
 
 ### 目录分层
 
@@ -66,6 +67,7 @@
 │   ├── components/
 │   │   ├── common/
 │   │   │   ├── ConfirmModal.vue        # 通用确认弹窗
+│   │   │   ├── LanguageSwitcher.vue     # 简体中文 / 英文切换
 │   │   │   └── ThemeSwitcher.vue       # 亮色 / 系统 / 暗色三段式切换
 │   │   ├── dashboard/
 │   │   │   ├── AnalyticsOverview.vue   # 累计指标、热门页面与最近活跃
@@ -82,6 +84,10 @@
 │   │   └── Home.vue            # 首页（根据 isLoggedIn 切换 Login / Dashboard）
 │   ├── router/index.js         # 路由表
 │   ├── App.vue                 # 根组件（登录态 + OIDC 回调处理 + 全局 layout）
+│   ├── i18n.js                 # Vue I18n 初始化 + 语言偏好读取 / 应用 / 持久化
+│   ├── locales/
+│   │   ├── en-US.js            # 英文资源
+│   │   └── zh-CN.js            # 简体中文资源（默认）
 │   ├── main.js                 # 入口
 │   ├── style.css               # ⭐ 唯一全局 CSS（@theme + 主题映射 + 基础样式）
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
@@ -215,13 +221,22 @@
 - 组件继续使用全局 Token，不在模板中成批堆叠 `dark:` 变体；亮色映射统一维护在 `style.css` 的 `:root[data-theme='light']`
 - 亮色下 `.text-white` 会映射为强文字色；实色品牌 / 状态按钮必须使用 `text-on-accent` 保持固定白字
 
-### 5.4 响应式与断点
+### 5.4 多语言
+
+- 支持 `zh-CN` / `en-US`，默认 `zh-CN`；语言资源只在 `src/locales/` 维护
+- `src/i18n.js` 负责初始化、白名单校验、读取和持久化；偏好写入 `localStorage.open_kounter_locale`
+- `App.vue` 负责切换全局 locale；`LanguageSwitcher.vue` 只通过事件请求切换
+- 所有用户可见文案必须使用 `useI18n()` 的 `t()` 或 `<i18n-t>`，不要在组件中新增硬编码中文 / 英文
+- 日期和数字格式必须使用当前 locale；切换语言时同步更新 `<html lang>` 与页面标题
+- 消息成功 / 失败状态必须使用独立状态字段，禁止通过翻译后的文案关键字判断
+
+### 5.5 响应式与断点
 
 - 统一使用 Tailwind 默认断点：`sm (640)` / `md (768)` / `lg (1024)` / `xl (1280)`
 - **移动端优先**：基础样式 mobile，桌面用 `md:` / `lg:` 覆盖
 - **禁止**在 `<style scoped>` 内写 `@media (...)`；改用 Tailwind 响应式前缀
 
-### 5.5 公共视觉模式
+### 5.6 公共视觉模式
 
 | 模式 | 推荐组合 |
 |---|---|
@@ -273,6 +288,7 @@
 
 - **登录态单一信源**：`App.vue` 的 `token` / `isLoggedIn` ref；通过 `<router-view :token :isLoggedIn @login>` 下发
 - **主题状态单一信源**：`App.vue` 的 `themeMode` ref；切换控件通过 `update:modelValue` 交给 `App.vue` 写入 `open_kounter_theme`
+- **语言状态单一信源**：Vue I18n 的全局 `locale`；切换统一由 `App.vue` 调用 `saveLocale` 写入 `open_kounter_locale`
 - 子组件想要刷新登录态：`emit('login', newToken)` 冒泡到 `App.vue`，由 `App.vue` 写 `localStorage`
 - 子组件**不要**直接写 `localStorage.setItem('open_kounter_token', ...)`
 - 跨组件共享数据：优先 props / emit；多层共享用 `provide / inject`
@@ -518,7 +534,8 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 1**：Passkey 无密码登录
 - [x] **Phase 2**：OIDC 单点登录 + 登录页渐进式检测
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
-- [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
+- [x] **Phase 4**：管理后台简体中文 / 英文国际化（语言持久化 + 文档语言同步）
+- [ ] **Phase 5**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。
 

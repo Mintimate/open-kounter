@@ -1,11 +1,16 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+
+import { useI18n } from 'vue-i18n'
+
 import ConfirmModal from '../common/ConfirmModal.vue'
 
 const props = defineProps(['token'])
+const { t } = useI18n()
 
 const loading = ref(false)
 const message = ref('')
+const messageType = ref('error')
 const hasPasskey = ref(false)
 const credentials = ref([])
 const username = ref('admin')
@@ -129,14 +134,16 @@ const handleBindPasskey = async () => {
     const verifyData = await verifyRes.json()
     
     if (verifyData.code === 0) {
-      message.value = hasPasskey.value ? 'Passkey 重新绑定成功！' : 'Passkey 绑定成功！'
+      message.value = hasPasskey.value ? t('passkey.rebindSuccess') : t('passkey.bindSuccess')
+      messageType.value = 'success'
       await checkPasskey()
     } else {
       throw new Error(verifyData.message)
     }
   } catch (e) {
     console.error('Bind passkey error:', e)
-    message.value = `绑定失败: ${e.message}`
+    message.value = t('passkey.bindFailed', { message: e.message })
+    messageType.value = 'error'
   } finally {
     loading.value = false
   }
@@ -163,7 +170,8 @@ const executeSyncAdminToken = async () => {
     const data = await res.json()
     if (data.code === 0) {
       showSyncModal.value = false
-      message.value = 'ADMIN_TOKEN 已覆盖写入 Blob！即将重新加载...'
+      message.value = t('passkey.syncSuccess')
+      messageType.value = 'success'
       setTimeout(() => {
         window.location.reload()
       }, 1500)
@@ -172,7 +180,8 @@ const executeSyncAdminToken = async () => {
     }
   } catch (e) {
     console.error('Sync admin token error:', e)
-    message.value = `同步失败: ${e.message}`
+    message.value = t('passkey.syncFailed', { message: e.message })
+    messageType.value = 'error'
   } finally {
     loading.value = false
   }
@@ -183,12 +192,14 @@ const openUpdateModal = () => {
   if (!newToken.value) return
 
   if (authMethod.value === 'passkey' && !hasPasskey.value) {
-    message.value = '请先绑定 Passkey'
+    message.value = t('passkey.bindFirst')
+    messageType.value = 'error'
     return
   }
 
   if (authMethod.value === 'token' && !oldToken.value) {
-    message.value = '请输入旧 Token'
+    message.value = t('passkey.oldTokenRequired')
+    messageType.value = 'error'
     return
   }
 
@@ -285,7 +296,8 @@ const executeUpdateToken = async () => {
 
     if (updateData.code === 0) {
       showUpdateModal.value = false
-      message.value = 'Token 更新成功！即将重新加载...'
+      message.value = t('passkey.updateSuccess')
+      messageType.value = 'success'
       newToken.value = ''
       oldToken.value = ''
       setTimeout(() => {
@@ -296,7 +308,8 @@ const executeUpdateToken = async () => {
     }
   } catch (e) {
     console.error('Update token error:', e)
-    message.value = `更新失败: ${e.message}`
+    message.value = t('passkey.updateFailed', { message: e.message })
+    messageType.value = 'error'
     showUpdateModal.value = false
   } finally {
     loading.value = false
@@ -328,15 +341,15 @@ function base64URLDecode(base64url) {
 <template>
   <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
     <div class="flex items-center justify-between mb-1">
-      <h3 class="text-base font-semibold text-white">Passkey 管理</h3>
+      <h3 class="text-base font-semibold text-white">{{ t('passkey.title') }}</h3>
       <div v-if="hasPasskey" class="px-2 py-0.5 bg-green-500/10 border border-green-500/20 rounded text-green-400 text-xs flex items-center gap-1">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
         </svg>
-        已绑定
+        {{ t('common.bound') }}
       </div>
     </div>
-    <p class="text-xs text-gray-500 mb-3">使用生物识别快速登录</p>
+    <p class="text-xs text-gray-500 mb-3">{{ t('passkey.description') }}</p>
 
     <div class="space-y-2">
       <button
@@ -348,13 +361,13 @@ function base64URLDecode(base64url) {
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
-        <span>{{ loading ? '处理中...' : (hasPasskey ? '重新绑定' : '绑定 Passkey') }}</span>
+        <span>{{ loading ? t('common.processing') : (hasPasskey ? t('passkey.rebind') : t('passkey.bind')) }}</span>
       </button>
 
       <!-- Sync ADMIN_TOKEN to Blob -->
       <div v-if="hasAdminToken" class="border-t border-dark-700 pt-2 mt-2">
         <div class="flex items-center justify-between mb-1">
-          <p class="text-xs text-gray-500">环境变量同步</p>
+          <p class="text-xs text-gray-500">{{ t('passkey.environmentSync') }}</p>
           <div class="px-2 py-0.5 bg-amber-500/10 border border-amber-500/20 rounded text-amber-400 text-xs flex items-center gap-1">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -362,7 +375,7 @@ function base64URLDecode(base64url) {
             ADMIN_TOKEN
           </div>
         </div>
-        <p class="text-xs text-gray-600 mb-2">检测到 ADMIN_TOKEN 环境变量，可将其覆盖写入 Blob 主存储</p>
+        <p class="text-xs text-gray-600 mb-2">{{ t('passkey.environmentSyncHint') }}</p>
         <button
           @click="openSyncModal"
           :disabled="loading"
@@ -371,13 +384,13 @@ function base64URLDecode(base64url) {
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
-          <span>TOKEN 覆盖至 Blob</span>
+          <span>{{ t('passkey.syncToBlob') }}</span>
         </button>
       </div>
 
       <div v-if="hasPasskey" class="border-t border-dark-700 pt-2 mt-2">
         <div class="flex items-center justify-between mb-2">
-          <p class="text-xs text-gray-500">更新 Token</p>
+          <p class="text-xs text-gray-500">{{ t('passkey.update') }}</p>
           <div class="flex gap-2 text-xs" v-if="hasPasskey">
             <button 
               @click="authMethod = 'passkey'"
@@ -388,7 +401,7 @@ function base64URLDecode(base64url) {
               @click="authMethod = 'token'"
               class="px-2 py-0.5 rounded transition-colors"
               :class="authMethod === 'token' ? 'bg-primary-500/20 text-primary-400' : 'text-gray-500 hover:text-gray-300'"
-            >旧 Token</button>
+            >{{ t('passkey.oldToken') }}</button>
           </div>
         </div>
 
@@ -397,14 +410,14 @@ function base64URLDecode(base64url) {
             v-if="authMethod === 'token'"
             v-model="oldToken" 
             type="password" 
-            placeholder="输入旧 Token"
+            :placeholder="t('passkey.oldTokenInput')"
             class="form-control field-compact w-full"
           />
           
           <input 
             v-model="newToken" 
             type="password" 
-            placeholder="输入新 Token"
+            :placeholder="t('passkey.newToken')"
             class="form-control field-compact w-full"
           />
           <button
@@ -412,7 +425,7 @@ function base64URLDecode(base64url) {
             :disabled="loading || !newToken || (authMethod === 'token' && !oldToken)"
             class="button-secondary button-compact w-full"
           >
-            <span>{{ authMethod === 'passkey' ? '验证 Passkey 并更新' : '更新 Token' }}</span>
+            <span>{{ authMethod === 'passkey' ? t('passkey.verifyAndUpdate') : t('passkey.update') }}</span>
           </button>
         </div>
       </div>
@@ -420,7 +433,7 @@ function base64URLDecode(base64url) {
       <div 
         v-if="message" 
         class="p-1.5 rounded text-xs text-center"
-        :class="message.includes('成功') ? 'text-green-400' : 'text-red-400'"
+        :class="messageType === 'success' ? 'text-green-400' : 'text-red-400'"
       >
         {{ message }}
       </div>
@@ -430,36 +443,36 @@ function base64URLDecode(base64url) {
   <!-- Sync ADMIN_TOKEN Modal -->
   <ConfirmModal
     v-model:show="showSyncModal"
-    title="同步 ADMIN_TOKEN"
+    :title="t('passkey.syncTitle')"
     variant="warning"
-    confirm-text="确认覆盖"
+    :confirm-text="t('passkey.syncConfirm')"
     :loading="loading"
     @confirm="executeSyncAdminToken"
   >
     <p class="text-gray-400 text-sm leading-relaxed">
-      确定要使用 <span class="text-amber-400 font-mono">ADMIN_TOKEN</span> 环境变量覆盖写入 Blob 主存储吗？
+      {{ t('passkey.syncDescription') }}
     </p>
     <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
-      <p>覆盖后 Blob 中的 Token 将与 ADMIN_TOKEN 保持一致，需要重新登录。</p>
+      <p>{{ t('passkey.syncHint') }}</p>
     </div>
   </ConfirmModal>
 
   <!-- Update Token Modal -->
   <ConfirmModal
     v-model:show="showUpdateModal"
-    title="危险操作确认"
+    :title="t('backup.dangerousTitle')"
     variant="warning"
-    confirm-text="确认更新"
+    :confirm-text="t('passkey.updateConfirm')"
     :loading="loading"
     @confirm="executeUpdateToken"
   >
     <p class="text-gray-400 text-sm leading-relaxed">
-      您正在尝试更新 Token。此操作将 <span class="text-amber-400 font-bold">使当前 Token 失效</span>，更新后需要重新登录。
+      {{ t('passkey.updateDescriptionBefore') }} <span class="text-amber-400 font-bold">{{ t('passkey.updateInvalidates') }}</span>{{ t('passkey.updateDescriptionAfter') }}
     </p>
     <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
-      <p v-if="authMethod === 'passkey'">将使用 Passkey 验证身份后更新 Token。</p>
-      <p v-else>将使用旧 Token 验证身份后更新 Token。</p>
-      <p class="mt-1 text-amber-500/80">注意：请确保牢记新的 Token，更新后旧 Token 将无法使用。</p>
+      <p v-if="authMethod === 'passkey'">{{ t('passkey.updateUsingPasskey') }}</p>
+      <p v-else>{{ t('passkey.updateUsingOldToken') }}</p>
+      <p class="mt-1 text-amber-500/80">{{ t('passkey.updateWarning') }}</p>
     </div>
   </ConfirmModal>
 </template>

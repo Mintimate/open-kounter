@@ -1,9 +1,13 @@
 <script setup>
 import { ref } from 'vue'
+
+import { useI18n } from 'vue-i18n'
+
 import ConfirmModal from '../common/ConfirmModal.vue'
 
 const props = defineProps(['token'])
 const emit = defineEmits(['refresh'])
+const { t } = useI18n()
 
 const importLoading = ref(false)
 const showImportModal = ref(false)
@@ -48,12 +52,12 @@ const executeExport = async () => {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
       showExportModal.value = false
-      showSuccess('导出成功！文件已开始下载。')
+      showSuccess(t('backup.exportSuccess'))
     } else {
-      errorMessage.value = '导出失败: ' + data.message
+      errorMessage.value = t('backup.exportFailed', { message: data.message })
     }
   } catch (e) {
-    errorMessage.value = '导出出错: ' + e.message
+    errorMessage.value = t('backup.exportError', { message: e.message })
   } finally {
     exportLoading.value = false
   }
@@ -91,7 +95,7 @@ const executeLegacyMigration = async () => {
     })
     const legacyData = await legacyRes.json()
     if (legacyData.code !== 0) {
-      throw new Error(legacyData.message || '旧 KV 导出失败')
+      throw new Error(legacyData.message || t('login.legacyExportFailed'))
     }
 
     const res = await fetch('/api/counter', {
@@ -109,13 +113,13 @@ const executeLegacyMigration = async () => {
     const data = await res.json()
     if (data.code === 0) {
       showMigrateModal.value = false
-      showSuccess(`旧 KV 数据已迁入 Blob，共导入 ${data.data.importedCounters} 个计数器。`)
+      showSuccess(t('backup.migrateSuccess', { count: data.data.importedCounters }))
       emit('refresh')
     } else {
-      errorMessage.value = '迁移失败: ' + data.message
+      errorMessage.value = t('backup.migrateFailed', { message: data.message })
     }
   } catch (e) {
-    errorMessage.value = '迁移出错: ' + e.message
+    errorMessage.value = t('backup.migrateError', { message: e.message })
   } finally {
     migrateLoading.value = false
   }
@@ -147,7 +151,7 @@ const handleFileChange = (event) => {
         })
 
         if (validCount === 0) {
-          throw new Error('无法识别的 LeanCloud 导出格式：未找到有效的计数器数据')
+          throw new Error(t('backup.invalidLeanCloud'))
         }
 
         importData.value = {
@@ -156,14 +160,14 @@ const handleFileChange = (event) => {
         }
       } else {
         if (!json.counters || !json.allowedDomains) {
-          throw new Error('无效的备份文件格式：缺少必要字段')
+          throw new Error(t('backup.invalidBackup'))
         }
         importData.value = json
       }
 
       showImportModal.value = true
     } catch (err) {
-      errorMessage.value = '解析文件失败: ' + err.message
+      errorMessage.value = t('backup.parseFailed', { message: err.message })
       setTimeout(() => {
         errorMessage.value = ''
       }, 3000)
@@ -197,14 +201,14 @@ const executeImport = async () => {
 
     const data = await res.json()
     if (data.code === 0) {
-      showSuccess(`导入成功！共恢复 ${data.data.imported} 个计数器。`)
+      showSuccess(t('backup.importSuccess', { count: data.data.imported }))
       closeImportModal()
       emit('refresh')
     } else {
-      errorMessage.value = '导入失败: ' + data.message
+      errorMessage.value = t('backup.importFailed', { message: data.message })
     }
   } catch (e) {
-    errorMessage.value = '导入出错: ' + e.message
+    errorMessage.value = t('backup.importError', { message: e.message })
   } finally {
     importLoading.value = false
   }
@@ -213,8 +217,8 @@ const executeImport = async () => {
 
 <template>
   <div class="bg-dark-800 rounded-xl border border-dark-700 shadow-sm p-4">
-    <h3 class="text-base font-semibold text-white mb-1">数据备份</h3>
-    <p class="text-xs text-gray-500 mb-3">导出数据或从备份恢复（支持 OpenKounter 备份及 LeanCloud 导出数据）</p>
+    <h3 class="text-base font-semibold text-white mb-1">{{ t('backup.title') }}</h3>
+    <p class="text-xs text-gray-500 mb-3">{{ t('backup.description') }}</p>
     
     <div class="flex gap-2 mb-2">
       <button 
@@ -224,7 +228,7 @@ const executeImport = async () => {
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
-        导出
+        {{ t('backup.export') }}
       </button>
       
       <input 
@@ -241,7 +245,7 @@ const executeImport = async () => {
         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
         </svg>
-        导入
+        {{ t('backup.import') }}
       </button>
     </div>
 
@@ -252,7 +256,7 @@ const executeImport = async () => {
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h10" />
       </svg>
-      旧 KV 迁移到 Blob
+      {{ t('backup.migrate') }}
     </button>
 
     <!-- Success Message -->
@@ -269,53 +273,53 @@ const executeImport = async () => {
   <!-- Export Confirmation Modal -->
   <ConfirmModal
     v-model:show="showExportModal"
-    title="确认导出数据"
-    confirm-text="确认导出"
+    :title="t('backup.exportTitle')"
+    :confirm-text="t('backup.exportConfirm')"
     :loading="exportLoading"
     @confirm="executeExport"
   >
     <p class="text-gray-400 text-sm leading-relaxed">
-      您即将导出所有计数器数据。
+      {{ t('backup.exportDescription') }}
     </p>
     <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
-      <p>此操作将生成包含所有计数器数据的 JSON 文件。</p>
-      <p class="mt-1 text-yellow-500/80">注意：导出操作需要遍历所有 Blob 计数器数据，计数器较多时耗时会更明显。</p>
+      <p>{{ t('backup.exportHint') }}</p>
+      <p class="mt-1 text-yellow-500/80">{{ t('backup.exportWarning') }}</p>
     </div>
   </ConfirmModal>
 
   <!-- Import Confirmation Modal -->
   <ConfirmModal
     v-model:show="showImportModal"
-    title="危险操作确认"
+    :title="t('backup.dangerousTitle')"
     variant="danger"
-    confirm-text="确认覆盖导入"
-    require-confirm-input="我确认覆盖全部数据"
+    :confirm-text="t('backup.importConfirm')"
+    :require-confirm-input="t('backup.importPhrase')"
     :loading="importLoading"
     @confirm="executeImport"
     @cancel="closeImportModal"
   >
     <p class="text-gray-400 text-sm leading-relaxed">
-      您正在尝试导入数据。此操作将 <span class="text-red-400 font-bold">永久覆盖并删除</span> 当前所有的计数器和配置数据。
+      {{ t('backup.importDescriptionBefore') }} <span class="text-red-400 font-bold">{{ t('backup.importDestructive') }}</span> {{ t('backup.importDescriptionAfter') }}
     </p>
     <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
-      <p>包含计数器：<span class="text-white">{{ importData ? Object.keys(importData.counters).length : 0 }}</span> 个</p>
-      <p>包含配置项：<span class="text-white">{{ importData ? (importData.allowedDomains || []).length : 0 }}</span> 个</p>
+      <p>{{ t('backup.counterCount', { count: importData ? Object.keys(importData.counters).length : 0 }) }}</p>
+      <p>{{ t('backup.configCount', { count: importData ? (importData.allowedDomains || []).length : 0 }) }}</p>
     </div>
   </ConfirmModal>
 
   <ConfirmModal
     v-model:show="showMigrateModal"
-    title="迁移旧 KV 数据"
-    confirm-text="确认迁移"
+    :title="t('backup.migrateTitle')"
+    :confirm-text="t('backup.migrateConfirm')"
     :loading="migrateLoading"
     @confirm="executeLegacyMigration"
   >
     <p class="text-gray-400 text-sm leading-relaxed">
-      将尝试从旧版 KV 存储读取计数器、配置和 Passkey 数据，并覆盖写入当前 Blob 存储。
+      {{ t('backup.migrateDescription') }}
     </p>
     <div class="mt-4 p-3 bg-dark-900 rounded border border-dark-700 text-xs text-gray-400">
-      <p>建议在首次切换到 Blob 后执行一次。</p>
-      <p class="mt-1 text-yellow-500/80">此操作会覆盖当前 Blob 中的历史迁移数据，请确认当前登录 Token 仍可访问旧 KV。</p>
+      <p>{{ t('backup.migrateHint') }}</p>
+      <p class="mt-1 text-yellow-500/80">{{ t('backup.migrateWarning') }}</p>
     </div>
   </ConfirmModal>
 </template>

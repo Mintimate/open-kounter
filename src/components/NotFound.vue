@@ -2,7 +2,10 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+import { useI18n } from 'vue-i18n'
+
 const router = useRouter()
+const { t } = useI18n()
 const isHovering = ref(false)
 
 const goHome = () => {
@@ -69,7 +72,7 @@ onMounted(() => {
             leave-to-class="transform scale-95 opacity-0 translate-y-2"
           >
             <div v-if="isHovering" class="absolute -top-12 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary text-on-accent text-xs rounded-lg whitespace-nowrap shadow-lg">
-              带我回家 🚀
+              {{ t('notFound.goHome') }}
               <div class="absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2 border-4 border-transparent border-t-primary"></div>
             </div>
           </transition>
@@ -78,12 +81,12 @@ onMounted(() => {
         <!-- 文本区域 -->
         <div class="space-y-4 mb-10">
           <h2 class="text-2xl md:text-3xl font-bold text-gray-100">
-            信号丢失...
+            {{ t('notFound.title') }}
           </h2>
           <p class="text-gray-400 max-w-md mx-auto">
-            您寻找的页面似乎漂流到了未知的星系。
+            {{ t('notFound.descriptionLine1') }}
             <br>
-            不要担心，我们随时可以返航。
+            {{ t('notFound.descriptionLine2') }}
           </p>
         </div>
 
@@ -98,7 +101,7 @@ onMounted(() => {
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
             </svg>
           </span>
-          <span>返回控制台</span>
+          <span>{{ t('notFound.returnConsole') }}</span>
         </button>
       </div>
 

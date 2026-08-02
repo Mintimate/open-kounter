@@ -1,12 +1,16 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 
+import { useI18n } from 'vue-i18n'
+
 const emit = defineEmits(['login'])
+const { t } = useI18n()
 
 const tokenInput = ref('')
 const isInitialized = ref(true)
 const loading = ref(false)
 const message = ref('')
+const messageType = ref('error')
 const username = ref('admin')
 const hasLegacyData = ref(false)
 const migrationLoading = ref(false)
@@ -95,7 +99,8 @@ const handleSubmit = async () => {
       })
       const data = await res.json()
       if (data.code === 0) {
-        message.value = '初始化成功！正在登录...'
+        message.value = t('login.initializingSuccess')
+        messageType.value = 'success'
         emit('login', tokenInput.value)
       } else {
         message.value = data.message
@@ -187,14 +192,16 @@ const handlePasskeyLogin = async () => {
     const verifyData = await verifyRes.json()
     
     if (verifyData.code === 0) {
-      message.value = 'Passkey 登录成功！'
+      message.value = t('login.passkeySuccess')
+      messageType.value = 'success'
       emit('login', verifyData.data.token)
     } else {
       throw new Error(verifyData.message)
     }
   } catch (e) {
     console.error('Passkey login error:', e)
-    message.value = `Passkey 登录失败: ${e.message}`
+    message.value = t('login.passkeyFailed', { message: e.message })
+    messageType.value = 'error'
   } finally {
     loading.value = false
   }
@@ -202,7 +209,8 @@ const handlePasskeyLogin = async () => {
 
 const handleLegacyMigration = async () => {
   if (!tokenInput.value) {
-    message.value = '请输入旧 KV Token 或 ADMIN_TOKEN'
+    message.value = t('login.oldTokenRequired')
+    messageType.value = 'error'
     return
   }
 
@@ -221,7 +229,7 @@ const handleLegacyMigration = async () => {
     const legacyData = await legacyRes.json()
 
     if (legacyData.code !== 0) {
-      throw new Error(legacyData.message || '旧 KV 导出失败')
+      throw new Error(legacyData.message || t('login.legacyExportFailed'))
     }
 
     const res = await fetch('/api/init', {
@@ -236,7 +244,8 @@ const handleLegacyMigration = async () => {
     const data = await res.json()
 
     if (data.code === 0) {
-      message.value = `迁移成功！已迁入 ${data.data.importedCounters} 个计数器，正在登录...`
+      message.value = t('login.migrationSuccess', { count: data.data.importedCounters })
+      messageType.value = 'success'
       emit('login', tokenInput.value)
     } else {
       message.value = data.message
@@ -292,7 +301,7 @@ function base64URLDecode(base64url) {
         Open Kounter
       </h1>
       <p class="text-gray-400 mb-8">
-        强一致 Blob 计数，简单可视化 <span class="mx-2 text-gray-600">|</span> {{ isInitialized ? '欢迎回来' : '系统初始化' }}
+        {{ t('app.slogan') }} <span class="mx-2 text-gray-600">|</span> {{ isInitialized ? t('login.welcomeBack') : t('login.initializing') }}
       </p>
     </div>
 
@@ -308,12 +317,12 @@ function base64URLDecode(base64url) {
           <div class="w-3.5 h-3.5 bg-primary-hover rounded-full animate-bounce shadow-lg shadow-primary-hover/50" style="animation-delay: -0.15s"></div>
           <div class="w-3.5 h-3.5 bg-primary/70 rounded-full animate-bounce shadow-lg shadow-primary/40"></div>
         </div>
-        <p class="text-sm font-medium text-gray-400 tracking-wider">正在检测登录环境...</p>
+        <p class="text-sm font-medium text-gray-400 tracking-wider">{{ t('login.checking') }}</p>
       </div>
 
       <div v-else class="relative space-y-6 animate-fade-in">
         <div class="space-y-2">
-          <label class="text-sm font-medium text-gray-300 ml-1">管理员 Token</label>
+          <label class="text-sm font-medium text-gray-300 ml-1">{{ t('login.adminToken') }}</label>
           <div class="relative">
             <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -323,7 +332,7 @@ function base64URLDecode(base64url) {
             <input 
               type="password" 
               v-model="tokenInput" 
-              placeholder="请输入您的访问令牌" 
+              :placeholder="t('login.placeholder')"
               @keyup.enter="handleSubmit" 
               class="form-control w-full rounded-xl py-3.5 pl-11 pr-4"
             />
@@ -339,7 +348,7 @@ function base64URLDecode(base64url) {
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          <span>{{ loading ? '验证中...' : (isInitialized ? '立即登录' : '设置并登录') }}</span>
+          <span>{{ loading ? t('login.validating') : (isInitialized ? t('login.loginNow') : t('login.setAndLogin')) }}</span>
           <svg v-if="!loading" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
           </svg>
@@ -358,11 +367,11 @@ function base64URLDecode(base64url) {
           <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h10" />
           </svg>
-          <span>{{ migrationLoading ? '迁移中...' : '从旧 KV 迁移到 Blob' }}</span>
+          <span>{{ migrationLoading ? t('login.migrationInProgress') : t('login.legacyMigration') }}</span>
         </button>
 
         <p v-if="!isInitialized && hasLegacyData" class="text-xs text-emerald-300/80 text-center leading-relaxed">
-          检测到旧 KV 数据，可直接使用现有 Token 迁移到 Blob 并完成初始化。
+          {{ t('login.legacyHint') }}
         </p>
 
         <!-- Passkey 登录 -->
@@ -371,7 +380,7 @@ function base64URLDecode(base64url) {
             <div class="w-full border-t border-dark-600"></div>
           </div>
           <div class="relative flex justify-center text-xs uppercase">
-            <span class="bg-dark-800 px-2 text-gray-500">或</span>
+            <span class="bg-dark-800 px-2 text-gray-500">{{ t('login.or') }}</span>
           </div>
         </div>
 
@@ -384,7 +393,7 @@ function base64URLDecode(base64url) {
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
-          <span>使用 Passkey 登录</span>
+          <span>{{ t('login.passkeyLogin') }}</span>
         </button>
 
         <!-- OIDC 登录 -->
@@ -397,15 +406,15 @@ function base64URLDecode(base64url) {
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
           </svg>
-          <span>使用 OIDC 登录</span>
+          <span>{{ t('login.oidcLogin') }}</span>
         </button>
         
         <div 
           v-if="message"
           class="p-4 rounded-xl text-sm text-center flex items-center justify-center gap-2 animate-fade-in"
-          :class="message.includes('成功') ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'"
+          :class="messageType === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'"
         >
-          <svg v-if="message.includes('成功')" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg v-if="messageType === 'success'" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -418,7 +427,7 @@ function base64URLDecode(base64url) {
     
     <div class="mt-8 text-center">
       <p class="text-xs text-gray-600">
-        &copy; {{ new Date().getFullYear() }} Open Kounter. All rights reserved.
+        &copy; {{ new Date().getFullYear() }} Open Kounter. {{ t('login.copyright') }}
       </p>
     </div>
   </div>

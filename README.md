@@ -1,6 +1,6 @@
 # Open Kounter
 
-Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单、旧版 KV 一键迁移、Passkey 无密码登录、OIDC 单点登录，以及亮色 / 跟随系统 / 暗色主题切换。
+Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单、旧版 KV 一键迁移、Passkey 无密码登录、OIDC 单点登录、中英双语，以及亮色 / 跟随系统 / 暗色主题切换。
 
 ![Open Kounter Demo](./other/demoOfAdmin.webp)
 
@@ -129,6 +129,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   ├── components/
 │   │   ├── common/
 │   │   │   ├── ConfirmModal.vue         # 通用确认弹窗
+│   │   │   ├── LanguageSwitcher.vue      # 中英文切换
 │   │   │   └── ThemeSwitcher.vue        # 三段式主题切换
 │   │   ├── dashboard/
 │   │   │   ├── AnalyticsOverview.vue    # 累计指标、热门页面与最近活跃
@@ -142,6 +143,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   │   ├── Login.vue       # 登录组件
 │   │   └── NotFound.vue    # 404 页面
 │   ├── App.vue             # 主应用组件
+│   ├── i18n.js             # 国际化初始化与语言偏好持久化
+│   ├── locales/            # 简体中文与英文文案资源
 │   ├── main.js             # 入口文件
 │   ├── style.css           # 全局样式与主题 Token
 │   └── theme.js            # 主题解析与持久化
@@ -353,6 +356,10 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 用户选择保存在浏览器的 `open_kounter_theme` 中；该值仅用于界面偏好，不包含认证信息。
 
 亮色和暗色模式共享统一的控件语义：仪表盘短操作按钮采用紧凑尺寸，并与相邻输入框保持等高；输入框独立保留移动端可读字号，避免聚焦时页面缩放。主色、成功和警示按钮使用随主题 Token 变化且满足可读对比度的低饱和色块。亮色模式下输入框统一为白底描边，暗色模式保持更深的输入区域；页面背景使用主题自适应的低对比度网格，丰富层次但不干扰内容阅读。
+
+## 界面语言
+
+管理后台支持简体中文和英文，默认使用简体中文。语言入口位于登录页右上角和登录后的顶栏中；选择结果会写入 `localStorage.open_kounter_locale`，下次访问时自动恢复。切换语言时页面文案、日期、数字格式、浏览器标签标题和 `<html lang>` 会同步更新。
 
 ## 登录方式
 
