@@ -50,6 +50,8 @@
 │   └── api/
 │       ├── _api.js             # 通用响应、CORS、鉴权工具
 │       ├── _blobStore.js       # Blob Store 工厂 + Key 命名规则 + 读写工具
+│       ├── _oidc.js            # OIDC Discovery/JWKS、PKCE、Cookie 与 Token 校验
+│       ├── _passkey.js         # WebAuthn 验签、可信 Origin 与旧凭证公钥兼容
 │       ├── _legacyMigration.js # 旧 KV → Blob 迁移逻辑
 │       ├── auth.js             # Token / OIDC session 校验
 │       ├── counter.js          # 计数器核心（inc / batch_inc / set / delete / list / summary / export / import / set_config）
@@ -85,6 +87,7 @@
 │   ├── main.js                 # 入口
 │   ├── style.css               # ⭐ 唯一全局 CSS（@theme + 主题映射 + 基础样式）
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
+├── tests/                      # Node 内置测试：认证
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
 ├── index.html
@@ -437,9 +440,32 @@ export async function onRequest({ request, env }) {
 ### 8.6 OIDC 子模块
 
 - 路径：`cloud-functions/api/oidc/{login,callback,status}.js`
-- `login.js` 必须将 `state` / `nonce` / `code_verifier`（如启用 PKCE）写入 Blob，TTL ≤ 10 分钟
-- `callback.js` 必须按以下顺序校验：`state` 一致 → `code` 兑换 token → `id_token` 签名 + `iss`/`aud`/`exp`/`nonce` 校验 → 落地绑定 / 登录
+- `login.js` 登录使用 GET；绑定使用 Bearer 鉴权的 POST `{ mode: "bind" }`，返回 `authorizationUrl`。禁止 URL 传管理员 Token。保存 `state` / `nonce` / `codeVerifier`（PKCE S256）及浏览器摘要，TTL 为 5 分钟。Cookie 必须使用 HttpOnly / Secure / SameSite=Lax。
+- `callback.js` 校验浏览器 Cookie → 唯一消费 `state` → 携带 PKCE verifier 换码 → `jose` 验签及 `iss`/`aud`/`exp`/`iat`/`nonce`/`azp` 校验 → 按 `issuer + sub` 绑定/登录。禁止未验签的 JWT 或 userinfo 回退。临时 Session 有效期 60 秒，仅存 Token 摘要；兑换时核对当前绑定和 Token。
+- JSON 接口继续使用 `_api.js`；OIDC 浏览器跳转允许 302，统一通过 `_oidc.js` 设置不缓存、清理 Cookie 和安全重定向。
 - `status.js` **只回传 boolean / 公开字段**（如 `oidcLoginEnabled` / `bound`），**绝不回传 `OIDC_CLIENT_SECRET`**
+
+
+### 8.7 Passkey 校验
+
+- 使用兼容 Node.js 20 的 `@simplewebauthn/server` 验证注册及登录。要求用户验证，校验 challenge、Origin、RP ID、签名及签名计数器，登录和管理使用不同 `purpose`。
+- 可信 Origin 仅来自 `PASSKEY_ORIGIN` 或服务端请求 URL；不从客户端 `Origin` / `Referer` 头建立信任。内部转发域名不同必须配置 `PASSKEY_ORIGIN`。
+- 旧 `publicKey` 的 attestationObject 仅在 RP ID / Credential ID 匹配且认证签名有效后转换为 COSE 格式。无法验证时拒绝并提示 Token 登录重绑，不批量删除旧凭证。
+- Challenge、OIDC state/session、管理 Token 必须通过 `consumeTransientJson` 的条件创建消费回执唯一消费；旧版管理 Token 缺少 `verificationVersion: 1` 时拒绝。
+
+### 8.8 本轮涉及的 Blob Key / 字段
+
+| Key（由 `_blobStore.js` 工厂生成） | 字段 | 生命周期 / 兼容 |
+|---|---|---|
+| `system/counters.json` | `items[target]: { target, time, created_at, updated_at }`, `updatedAt`, `version` | 维持 `2.1`；不改变计数布局 |
+| `passkey/credentials/<编码 id>.json` | `id`, `publicKey`, `publicKeyFormat`, `counter`, `transports`, `deviceType`, `backedUp`, `userId`, `webAuthnUserID`, `createdAt`, 可选 `lastUsedAt` | 新格式 `publicKeyFormat: "cose"`；旧格式无此标记，成功验签后转换 |
+| `passkey/challenges/<编码 id>.json` | `challenge`, `userId`, `purpose`, `origin`, `rpID`, `createdAt`, `expiresAt`；注册另含 `username`, `token`, `webAuthnUserID` | 5 分钟；`purpose` 为 `registration` / `authentication` / `management`，旧无上下文 challenge 需重发 |
+| `passkey/management-tokens/<编码 id>.json` | `userId`, `verificationVersion: 1`, `createdAt`, `expiresAt` | 5 分钟、唯一消费；拒绝旧版未验证凭证 |
+| `oidc/states/<编码 id>.json` | `state`, `nonce`, `mode`, `tokenHash`, `codeVerifier`, `issuer`, `clientId`, `redirectUri`, `browserHash`, `createdAt`, `expiresAt` | 5 分钟、唯一消费；`tokenHash` 仅绑定模式使用 |
+| `oidc/sessions/<编码 id>.json` | `sessionId`, `sub`, `issuer`, `boundAt`, `tokenHash`, `createdAt`, `expiresAt` | 60 秒、唯一消费；不保存实际管理员 Token |
+| `auth/consumed/<编码后的完整凭证 Key>` | `expiresAt`, `consumedAt` | 通过 `onlyIfNew` 创建；不会自动回收，维护时在凭证过期且无在途消费请求后清理 |
+
+认证库仅用于 Cloud Functions，不导入前端。为兼容现有 Bearer 登录架构，成功的 Passkey/OIDC 登录交换可以返回实际管理 Token；状态查询和其它管理响应仍禁止泄露凭证。
 
 ---
 
@@ -458,6 +484,7 @@ export async function onRequest({ request, env }) {
 ## 10) 质量门禁（提交前自检）
 
 ```bash
+npm test                # 认证回归必须通过
 npm run build           # 构建必须通过，无新告警
 ```
 
@@ -484,6 +511,7 @@ npm run build           # 构建必须通过，无新告警
 | `OPEN_KOUNTER` | 否（仅迁移期） | 旧版 KV 命名空间绑定，仅 `edge-functions/legacy-api/migrate.js` 使用 |
 | `ADMIN_TOKEN` | 否 | 预设管理员 Token；优先级高于 Blob 中存储的 token |
 | `PASSKEY_RP_ID` | 否 | Passkey RP ID，默认使用当前域名 hostname |
+| `PASSKEY_ORIGIN` | 否 | 可信公开 Origin；默认使用服务端请求 URL，内部转发域名不同须配置，禁止从 Origin/Referer 请求头推导 |
 | `PASSKEY_RP_NAME` | 否 | Passkey 显示名称，默认 `Open Kounter` |
 | `OIDC_ISSUER` | 否 | OIDC Issuer URL；与下列三项任一缺失 → OIDC 视为未启用 |
 | `OIDC_CLIENT_ID` | 否 | OIDC Client ID |

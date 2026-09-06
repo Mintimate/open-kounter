@@ -1,4 +1,4 @@
-import { getStore } from '@edgeone/pages-blob'
+import { getStore, PreconditionFailedError } from '@edgeone/pages-blob'
 
 const DEFAULT_STORE_NAME = 'open-kounter'
 const STRONG_CONSISTENCY = 'strong'
@@ -150,6 +150,36 @@ export function passkeyChallengeKey(challengeId) {
 
 export function passkeyManagementTokenKey(tokenId) {
   return `${PASSKEY_MANAGEMENT_TOKENS_PREFIX}${encodeKeySegment(tokenId)}.json`
+}
+
+export function oidcStateKey(id) {
+  return `oidc/states/${encodeKeySegment(id)}.json`
+}
+
+export function oidcSessionKey(id) {
+  return `oidc/sessions/${encodeKeySegment(id)}.json`
+}
+
+export function consumedDocumentKey(key) {
+  return `auth/consumed/${encodeKeySegment(key)}`
+}
+
+// onlyIfNew elects exactly one consumer; read-then-delete alone is not atomic.
+// Receipts must not be removed while a request that read the original can still run.
+export async function consumeTransientJson(store, key) {
+  const value = await readJson(store, key)
+  if (!value || !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now()) return null
+  try {
+    await writeJson(store, consumedDocumentKey(key), {
+      expiresAt: value.expiresAt,
+      consumedAt: Date.now()
+    }, { onlyIfNew: true })
+  } catch (error) {
+    if (error instanceof PreconditionFailedError) return null
+    throw error
+  }
+  await deleteJson(store, key)
+  return value.expiresAt > Date.now() ? value : null
 }
 
 export async function getCounterRecord(store, target) {

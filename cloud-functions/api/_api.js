@@ -1,4 +1,5 @@
 import {
+  consumeTransientJson,
   createOpenKounterStore,
   deleteJson,
   loadSystemState,
@@ -20,6 +21,8 @@ export function getCorsHeaders(request) {
   const origin = request.headers.get('origin') || '*'
   return {
     'Content-Type': 'application/json; charset=UTF-8',
+    'Cache-Control': 'no-store',
+    'Vary': 'Origin',
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-LC-Id, X-LC-Key',
@@ -112,5 +115,6 @@ export async function loadManagementToken(store, tokenId) {
 }
 
 export async function consumeManagementToken(store, tokenId) {
-  await deleteJson(store, passkeyManagementTokenKey(tokenId))
+  const value = await consumeTransientJson(store, passkeyManagementTokenKey(tokenId))
+  return value?.verificationVersion === 1 ? value : null
 }

@@ -82,7 +82,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   - 如需自定义名称，可设置环境变量 `OPEN_KOUNTER_BLOB_STORE`
 
 3. **Passkey 域名配置（可选）**
-  - Passkey 默认会使用当前页面 `Origin` 的 hostname 作为 RP ID
+  - Passkey 默认使用服务端 `request.url` 的 Origin 和 hostname，不信任请求的 `Origin` / `Referer` 头；如平台内部转发地址与公开域名不同，请设置 `PASSKEY_ORIGIN=https://你的公开域名`
   - 如需固定 RP ID 或跨环境统一配置，可设置环境变量 `PASSKEY_RP_ID`
   - 如需自定义显示名称，可设置环境变量 `PASSKEY_RP_NAME`
 
@@ -297,18 +297,17 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 
 #### 1. 发起 OIDC 授权
-- **URL**: `GET /api/oidc/login?mode=login|bind`
-- **说明**:
-  - `mode=login`：发起 OIDC 登录。
-  - `mode=bind&token=<ADMIN_TOKEN>`：管理员登录后绑定 OIDC 身份。
-  - 后端会生成 `state` / `nonce`，写入 Blob 后重定向到 OIDC Provider 授权端点。
+- **登录**：`GET /api/oidc/login?mode=login`，要求当前 Issuer 已绑定，成功后返回 302。
+- **绑定**：`POST /api/oidc/login`，携带 `Authorization: Bearer <YOUR_TOKEN>`，Body 为 `{ "mode": "bind" }`。返回 `{ "code": 0, "data": { "authorizationUrl": "..." } }`，前端再跳转。
+- **安全约定**：不再接受 URL 中的管理员 Token。后端保存 5 分钟的 `state` / `nonce` / PKCE verifier 和浏览器随机值的摘要，通过 HttpOnly、Secure、SameSite=Lax Cookie 将回调绑定到发起登录的浏览器。Provider 须支持 HTTPS、OIDC Discovery/JWKS、PKCE S256，以及 `client_secret_basic` 或 `client_secret_post`。
+- 同一浏览器同时发起多个 OIDC 流程时，仅最新流程的 Cookie 有效；旧流程需重新发起。
 
 #### 2. OIDC 回调
 - **URL**: `GET /api/oidc/callback?code=xxx&state=yyy`
-- **说明**:
-  - 由 OIDC Provider 回调。
-  - `bind` 模式会验证管理员 Token 并把绑定身份写入 `system/state.json`。
-  - `login` 模式会校验 `sub` 是否与已绑定身份一致，成功后生成一次性 OIDC Session。
+- 验证浏览器 Cookie 和配置，唯一消费 state，再携带 PKCE verifier 换码。
+- 使用 `jose` 和 Provider JWKS 验证签名及 `iss` / `aud` / `exp` / `iat` / `nonce`；多 audience 时校验 `azp`。仅接受配置的非对称签名算法集合，不回退到未验证的 userinfo。
+- `bind` 模式重新确认管理员授权仍有效，并保存身份；`login` 模式匹配 `issuer + sub`。
+- 登录成功返回有效期 60 秒的一次性 Session；Session 只保存身份及 Token 摘要，不保存实际管理员 Token。
 
 #### 3. 查询 / 解绑 OIDC 状态
 - **URL**: `POST /api/oidc/status`
@@ -327,7 +326,14 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
     "oidcSession": "<session-id>"
   }
   ```
-- **说明**: 前端在 OIDC 回调后自动调用；Session 是一次性的，验证后会被删除。
+- **说明**: 前端在 OIDC 回调后自动调用；Session 通过条件创建消费回执保证只能成功交换一次，同时核对当前绑定身份、绑定时间和 Token 摘要。解绑、重新绑定或 Token 变更后，旧 Session 失效。
+
+### Passkey 校验与兼容
+
+- Cloud Functions 使用 `@simplewebauthn/server` 校验注册响应及登录签名，包括 challenge、可信 Origin、RP ID、用户存在/验证标志与签名计数器；注册和登录均要求 `userVerification: required`。
+- `POST /api/passkey` 的 `generateAuthenticationOptions` 支持 `data.purpose`，默认 `authentication`；调用 `generateManagementToken` 前须传 `management`，两类 challenge 不能互换。管理 Token 必须由新版本验签生成，并且仅能消费一次。
+- 新凭证使用 Base64URL 编码的 COSE 公钥并标记 `publicKeyFormat: "cose"`。旧版存储的 attestationObject 会在验证 RP ID 和 Credential ID 后提取公钥，成功验签后才更新格式；无法解析的旧凭证需通过 Token 登录后重新绑定。
+- 升级前进行中的登录/绑定需重新发起；旧版未验证的临时管理凭证不再接受。实际管理员 Token 仅在成功的登录交换中返回，以兼容现有前端 Bearer 鉴权。
 
 ## 环境变量一览
 
@@ -336,6 +342,7 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 | `OPEN_KOUNTER_BLOB_STORE` | 否 | 自定义 Blob Store 名称，默认 `open-kounter` |
 | `ADMIN_TOKEN` | 否 | 预设管理员 Token（优先级高于 Blob 中存储的 Token） |
 | `PASSKEY_RP_ID` | 否 | Passkey RP ID，默认使用当前域名 |
+| `PASSKEY_ORIGIN` | 否 | 可信的公开 Origin，例如 `https://counter.example.com`；默认从服务端请求 URL 推导，内部转发域名不一致时必须配置 |
 | `PASSKEY_RP_NAME` | 否 | Passkey 显示名称，默认 `Open Kounter` |
 | `OIDC_ISSUER` | 否 | OIDC Issuer URL，例如 `https://auth.example.com/realms/master` |
 | `OIDC_CLIENT_ID` | 否 | OIDC 客户端 ID |
@@ -377,3 +384,13 @@ OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中
 ## 许可证
 
 本项目基于 [MIT License](./LICENSE) 开源。
+
+
+## 本地验证
+
+```bash
+npm test
+npm run build
+```
+
+回归测试使用内存 Blob 和本地生成的签名密钥，覆盖 Passkey、OIDC 完整绑定/登录及重复消费，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。

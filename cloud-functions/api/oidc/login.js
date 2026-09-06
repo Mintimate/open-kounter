@@ -1,90 +1,58 @@
-import { createStore } from '../_api.js'
-import { writeJson } from '../_blobStore.js'
+import { createStore, failResponse, optionsResponse, requireAuth, successResponse } from '../_api.js'
+import { loadSystemState, oidcStateKey, writeJson } from '../_blobStore.js'
+import {
+  discoverOIDCEndpoints, hasOidcConfig, hashOidcValue, OIDC_TTL_MS,
+  oidcCookie, randomOidcValue
+} from '../_oidc.js'
 
-const OIDC_STATE_PREFIX = 'oidc/states/'
-const STATE_TTL_MS = 5 * 60 * 1000 // 5 分钟
-
-/**
- * 发起 OIDC 授权流程
- * GET /api/oidc/login?mode=login|bind&token=xxx
- *   mode=bind 时需要携带 token 参数（管理员绑定 OIDC 身份）
- *   mode=login 时直接发起登录
- */
-export async function onRequestGet(context) {
-  const { request, env } = context
-
-  // 检查 OIDC 配置
-  if (!env.OIDC_ISSUER || !env.OIDC_CLIENT_ID || !env.OIDC_CLIENT_SECRET || !env.OIDC_REDIRECT_URI) {
-    return new Response('OIDC not configured', { status: 500 })
+export async function onRequest({ request, env }) {
+  if (request.method === 'OPTIONS') return optionsResponse(request)
+  try {
+    if (!hasOidcConfig(env)) throw new Error('OIDC not configured')
+    const url = new URL(request.url)
+    const store = createStore({ env })
+    let mode = 'login'
+    let tokenHash = null
+    if (request.method === 'POST') {
+      const auth = await requireAuth(request, store, env)
+      const body = await request.json()
+      if (body.mode !== 'bind') throw new Error('Invalid OIDC mode')
+      mode = 'bind'
+      tokenHash = hashOidcValue(auth.token)
+    } else if (request.method === 'GET') {
+      if ((url.searchParams.get('mode') || 'login') !== 'login' || url.searchParams.has('token')) {
+        throw new Error('OIDC binding requires an authenticated POST')
+      }
+      const state = await loadSystemState(store)
+      if (!state.oidc?.sub || state.oidc.issuer !== env.OIDC_ISSUER) throw new Error('OIDC not bound')
+    } else {
+      throw new Error('Method not allowed')
+    }
+    const endpoints = await discoverOIDCEndpoints(env.OIDC_ISSUER)
+    const state = randomOidcValue()
+    const nonce = randomOidcValue()
+    const browserSecret = randomOidcValue()
+    const codeVerifier = randomOidcValue()
+    await writeJson(store, oidcStateKey(state), {
+      state, nonce, mode, tokenHash, codeVerifier,
+      issuer: env.OIDC_ISSUER, clientId: env.OIDC_CLIENT_ID, redirectUri: env.OIDC_REDIRECT_URI,
+      browserHash: hashOidcValue(browserSecret),
+      createdAt: Date.now(), expiresAt: Date.now() + OIDC_TTL_MS
+    }, { onlyIfNew: true })
+    const authUrl = new URL(endpoints.authorization_endpoint)
+    for (const [key, value] of Object.entries({
+      response_type: 'code', client_id: env.OIDC_CLIENT_ID, redirect_uri: env.OIDC_REDIRECT_URI,
+      scope: 'openid email profile', state, nonce,
+      code_challenge: hashOidcValue(codeVerifier), code_challenge_method: 'S256'
+    })) authUrl.searchParams.set(key, value)
+    const response = mode === 'bind'
+      ? successResponse(request, { authorizationUrl: authUrl.toString() })
+      : new Response(null, { status: 302, headers: { Location: authUrl.toString() } })
+    response.headers.set('Set-Cookie', oidcCookie(browserSecret))
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('Referrer-Policy', 'no-referrer')
+    return response
+  } catch (error) {
+    return failResponse(request, error.message)
   }
-
-  const url = new URL(request.url)
-  const mode = url.searchParams.get('mode') || 'login' // 'login' | 'bind'
-  const token = url.searchParams.get('token') || ''
-
-  // bind 模式必须携带 token
-  if (mode === 'bind' && !token) {
-    return new Response('Token required for bind mode', { status: 400 })
-  }
-
-  const store = createStore(context)
-
-  // 生成 state 和 nonce
-  const stateBytes = new Uint8Array(32)
-  crypto.getRandomValues(stateBytes)
-  const state = base64URLEncode(stateBytes)
-
-  const nonceBytes = new Uint8Array(32)
-  crypto.getRandomValues(nonceBytes)
-  const nonce = base64URLEncode(nonceBytes)
-
-  // 存储 state 到 Blob
-  await writeJson(store, `${OIDC_STATE_PREFIX}${state}.json`, {
-    state,
-    nonce,
-    mode,
-    token: mode === 'bind' ? token : '',
-    createdAt: Date.now(),
-    expiresAt: Date.now() + STATE_TTL_MS
-  })
-
-  // 发现 OIDC 端点
-  const endpoints = await discoverOIDCEndpoints(env.OIDC_ISSUER)
-
-  // 构建授权 URL
-  const authParams = new URLSearchParams({
-    response_type: 'code',
-    client_id: env.OIDC_CLIENT_ID,
-    redirect_uri: env.OIDC_REDIRECT_URI,
-    scope: 'openid email profile',
-    state,
-    nonce
-  })
-
-  const authUrl = `${endpoints.authorization_endpoint}?${authParams.toString()}`
-
-  return Response.redirect(authUrl, 302)
 }
-
-/**
- * 发现 OIDC 端点配置
- */
-async function discoverOIDCEndpoints(issuer) {
-  const wellKnownUrl = `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`
-  const res = await fetch(wellKnownUrl)
-  if (!res.ok) {
-    throw new Error(`Failed to fetch OIDC discovery document: ${res.status}`)
-  }
-  return await res.json()
-}
-
-function base64URLEncode(buffer) {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i])
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-}
-
-export default { onRequestGet }

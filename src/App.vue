@@ -61,7 +61,7 @@ onMounted(async () => {
   }
 
   if (oidcError) {
-    oidcMessage.value = `OIDC 错误: ${decodeURIComponent(oidcError)}`
+    oidcMessage.value = `OIDC 错误: ${oidcError}`
     isLoading.value = false
     return
   }

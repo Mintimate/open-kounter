@@ -40,14 +40,23 @@ onMounted(() => {
 })
 
 // 发起 OIDC 绑定
-const handleBind = () => {
+const handleBind = async () => {
   loading.value = true
-  // 跳转到 OIDC 登录端点，携带 mode=bind 和当前 token
-  const params = new URLSearchParams({
-    mode: 'bind',
-    token: props.token
-  })
-  window.location.href = `/api/oidc/login?${params.toString()}`
+  message.value = ''
+  try {
+    const response = await fetch('/api/oidc/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${props.token}` },
+      body: JSON.stringify({ mode: 'bind' }),
+      signal: AbortSignal.timeout(15000)
+    })
+    const result = await response.json()
+    if (result.code !== 0) throw new Error(result.message || 'OIDC 绑定失败')
+    window.location.assign(result.data.authorizationUrl)
+  } catch (error) {
+    message.value = error.message
+    loading.value = false
+  }
 }
 
 // 解绑 OIDC

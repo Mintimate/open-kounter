@@ -209,7 +209,7 @@ const executeUpdateToken = async () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'generateAuthenticationOptions',
-          data: { username: username.value }
+          data: { username: username.value, purpose: 'management' }
         })
       })
       const optionsData = await optionsRes.json()

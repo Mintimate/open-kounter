@@ -1,6 +1,10 @@
+import { randomUUID } from 'node:crypto'
+
+import { verifyRegistrationResponse } from '@simplewebauthn/server'
+
 import {
+  consumeTransientJson,
   deleteJson,
-  loadSystemState,
   passkeyChallengeKey,
   passkeyCredentialKey,
   passkeyManagementTokenKey,
@@ -11,34 +15,19 @@ import {
   writeJson
 } from './_blobStore.js'
 import {
+  consumeManagementToken,
   createStore,
+  getEffectiveToken,
   jsonResponse,
   optionsResponse,
-  RES_CODE
+  RES_CODE,
+  validateTokenValue
 } from './_api.js'
+
+import { getPasskeyConfig, verifyPasskeyAssertion } from './_passkey.js'
 
 const VERSION = '2.0.0'
 const TRANSIENT_TTL_MS = 5 * 60 * 1000
-
-function getRPConfig(request, env) {
-  const url = new URL(request.url)
-  const origin = resolveRequestOrigin(request, url)
-  const originUrl = tryParseUrl(origin)
-  const requestHost = request.headers.get('host') || url.host
-  const rpID = normalizeRpId(
-    env?.PASSKEY_RP_ID
-      || env?.WEBAUTHN_RP_ID
-      || originUrl?.hostname
-      || requestHost
-      || url.hostname
-  )
-
-  return {
-    rpName: env?.PASSKEY_RP_NAME || 'Open Kounter',
-    rpID,
-    origin
-  }
-}
 
 export async function onRequest(context) {
   const { request, env } = context
@@ -55,12 +44,11 @@ export async function onRequest(context) {
     })
   }
 
-  const store = createStore(context)
-  const rpConfig = getRPConfig(request, env)
-
   try {
+    const store = createStore(context)
+    const rpConfig = getPasskeyConfig(request, env)
     const body = await request.json()
-    const { action, data } = body
+    const { action, data = {} } = body
 
     let result
     switch (action) {
@@ -68,13 +56,13 @@ export async function onRequest(context) {
         result = await handleGenerateRegistrationOptions(store, data, rpConfig, env)
         break
       case 'verifyRegistration':
-        result = await handleVerifyRegistration(store, data, rpConfig)
+        result = await handleVerifyRegistration(store, data, rpConfig, env)
         break
       case 'generateAuthenticationOptions':
         result = await handleGenerateAuthenticationOptions(store, data, rpConfig)
         break
       case 'verifyAuthentication':
-        result = await handleVerifyAuthentication(store, data, rpConfig)
+        result = await handleVerifyAuthentication(store, data, rpConfig, env)
         break
       case 'generateManagementToken':
         result = await handleGenerateManagementToken(store, data, rpConfig)
@@ -100,46 +88,6 @@ export async function onRequest(context) {
       message: `Passkey Error: ${error.message}`
     })
   }
-}
-
-function resolveRequestOrigin(request, url) {
-  const originHeader = request.headers.get('origin')
-  if (originHeader && originHeader !== 'null') {
-    return originHeader
-  }
-
-  const refererHeader = request.headers.get('referer')
-  const refererUrl = tryParseUrl(refererHeader)
-  if (refererUrl) {
-    return refererUrl.origin
-  }
-
-  return `${url.protocol}//${url.host}`
-}
-
-function tryParseUrl(value) {
-  if (!value) {
-    return null
-  }
-
-  try {
-    return new URL(value)
-  } catch {
-    return null
-  }
-}
-
-function normalizeRpId(value) {
-  const normalized = String(value || '').trim().toLowerCase()
-  if (!normalized) {
-    return 'localhost'
-  }
-
-  if (normalized === 'localhost') {
-    return normalized
-  }
-
-  return normalized.replace(/:\d+$/, '')
 }
 
 async function getUser(store, userId) {
@@ -223,18 +171,8 @@ async function saveChallenge(store, challengeId, data) {
 }
 
 async function getAndDeleteChallenge(store, challengeId) {
-  const key = passkeyChallengeKey(challengeId)
-  const data = await readJson(store, key)
-  if (!data) {
-    return null
-  }
-
-  if (data.expiresAt && data.expiresAt <= Date.now()) {
-    await deleteJson(store, key)
-    return null
-  }
-
-  await deleteJson(store, key)
+  const data = await consumeTransientJson(store, passkeyChallengeKey(challengeId))
+  if (!data) return null
 
   if (data.userId) {
     await updateUser(store, data.userId, (user) => {
@@ -254,24 +192,10 @@ async function getAndDeleteChallenge(store, challengeId) {
 async function saveManagementToken(store, tokenId, userId) {
   await writeJson(store, passkeyManagementTokenKey(tokenId), {
     userId,
+    verificationVersion: 1,
     createdAt: Date.now(),
     expiresAt: Date.now() + TRANSIENT_TTL_MS
   })
-}
-
-async function validateManagementToken(store, tokenId, expectedUserId) {
-  const key = passkeyManagementTokenKey(tokenId)
-  const data = await readJson(store, key)
-  if (!data) {
-    return false
-  }
-
-  if (data.expiresAt && data.expiresAt <= Date.now()) {
-    await deleteJson(store, key)
-    return false
-  }
-
-  return data.userId === expectedUserId
 }
 
 async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
@@ -281,11 +205,7 @@ async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
     return { code: RES_CODE.FAIL, message: 'Username and token are required' }
   }
 
-  const state = await loadSystemState(store)
-  const tokenValid = (state.token && token === state.token) || (env.ADMIN_TOKEN && token === env.ADMIN_TOKEN)
-  if (!tokenValid) {
-    return { code: RES_CODE.FAIL, message: 'Invalid token' }
-  }
+  await validateTokenValue(token, store, env)
 
   const userId = await generateUserIdFromUsername(username)
   let user = await getUser(store, userId)
@@ -339,7 +259,7 @@ async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
     excludeCredentials: [],
     authenticatorSelection: {
       residentKey: 'preferred',
-      userVerification: 'preferred',
+      userVerification: 'required',
       authenticatorAttachment: 'platform'
     }
   }
@@ -352,7 +272,10 @@ async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
     userId,
     username,
     token,
-    webAuthnUserID
+    webAuthnUserID,
+    purpose: 'registration',
+    origin: rpConfig.origin,
+    rpID: rpConfig.rpID
   })
 
   return {
@@ -364,7 +287,7 @@ async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
   }
 }
 
-async function handleVerifyRegistration(store, data, rpConfig) {
+async function handleVerifyRegistration(store, data, rpConfig, env) {
   const { challengeId, response } = data
 
   if (!challengeId || !response) {
@@ -377,28 +300,31 @@ async function handleVerifyRegistration(store, data, rpConfig) {
   }
 
   try {
-    const clientDataJSON = base64URLDecode(response.response.clientDataJSON)
-    const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON))
-
-    if (clientData.challenge !== challengeData.challenge) {
-      throw new Error('Challenge mismatch')
+    if (challengeData.purpose !== 'registration'
+      || challengeData.origin !== rpConfig.origin || challengeData.rpID !== rpConfig.rpID) {
+      throw new Error('Invalid registration challenge')
     }
-
-    if (clientData.origin !== rpConfig.origin) {
-      throw new Error(`Origin mismatch: expected ${rpConfig.origin}, got ${clientData.origin}`)
-    }
-
-    if (clientData.type !== 'webauthn.create') {
-      throw new Error('Invalid operation type')
-    }
-
+    await validateTokenValue(challengeData.token, store, env)
+    const verification = await verifyRegistrationResponse({
+      response,
+      expectedChallenge: challengeData.challenge,
+      expectedOrigin: rpConfig.origin,
+      expectedRPID: rpConfig.rpID,
+      requireUserVerification: true,
+      supportedAlgorithmIDs: [-7, -257]
+    })
+    if (!verification.verified) throw new Error('Registration verification failed')
+    const info = verification.registrationInfo
+    const existing = await getCredential(store, info.credential.id)
+    if (existing && existing.userId !== challengeData.userId) throw new Error('Credential already registered')
     const newCredential = {
-      id: response.id,
-      publicKey: response.response.attestationObject,
-      counter: 0,
+      id: info.credential.id,
+      publicKey: base64URLEncode(info.credential.publicKey),
+      publicKeyFormat: 'cose',
+      counter: info.credential.counter,
       transports: response.response.transports || [],
-      deviceType: 'multiDevice',
-      backedUp: true,
+      deviceType: info.credentialDeviceType,
+      backedUp: info.credentialBackedUp,
       userId: challengeData.userId,
       webAuthnUserID: challengeData.webAuthnUserID,
       createdAt: Date.now()
@@ -439,7 +365,8 @@ async function handleVerifyRegistration(store, data, rpConfig) {
 }
 
 async function handleGenerateAuthenticationOptions(store, data, rpConfig) {
-  const { username } = data
+  const { username, purpose = 'authentication' } = data
+  if (!['authentication', 'management'].includes(purpose)) throw new Error('Invalid challenge purpose')
 
   let allowCredentials = []
   let userId = null
@@ -471,7 +398,7 @@ async function handleGenerateAuthenticationOptions(store, data, rpConfig) {
     challenge,
     timeout: 60000,
     rpId: rpConfig.rpID,
-    userVerification: 'preferred',
+    userVerification: 'required',
     allowCredentials
   }
 
@@ -491,7 +418,10 @@ async function handleGenerateAuthenticationOptions(store, data, rpConfig) {
 
   await saveChallenge(store, challengeId, {
     challenge,
-    userId
+    userId,
+    purpose,
+    origin: rpConfig.origin,
+    rpID: rpConfig.rpID
   })
 
   return {
@@ -503,115 +433,44 @@ async function handleGenerateAuthenticationOptions(store, data, rpConfig) {
   }
 }
 
-async function handleVerifyAuthentication(store, data, rpConfig) {
+async function verifyAuthentication(store, data, rpConfig, purpose) {
   const { challengeId, response } = data
-
-  if (!challengeId || !response) {
-    return { code: RES_CODE.FAIL, message: 'Missing required parameters' }
-  }
-
-  const challengeData = await getAndDeleteChallenge(store, challengeId)
-  if (!challengeData) {
-    return { code: RES_CODE.FAIL, message: 'Challenge expired or invalid' }
-  }
-
+  if (!challengeId || !response?.id) throw new Error('Missing required parameters')
+  const challenge = await getAndDeleteChallenge(store, challengeId)
+  if (!challenge || challenge.purpose !== purpose) throw new Error('Challenge expired or invalid')
   const credential = await getCredential(store, response.id)
-  if (!credential) {
-    return { code: RES_CODE.FAIL, message: 'Credential not found' }
+  if (!credential || (challenge.userId && credential.userId !== challenge.userId)) {
+    throw new Error('Credential not allowed')
   }
-
   const user = await getUser(store, credential.userId)
-  if (!user) {
-    return { code: RES_CODE.FAIL, message: 'User not found' }
-  }
+  if (!user?.credentialIds?.includes(credential.id)) throw new Error('Credential not registered')
+  const handle = response.response?.userHandle
+  if (handle && handle !== (credential.webAuthnUserID || user.id)) throw new Error('User handle mismatch')
+  const verified = await verifyPasskeyAssertion(response, credential, challenge, rpConfig)
+  await writeJson(store, passkeyCredentialKey(credential.id), {
+    ...credential,
+    publicKey: base64URLEncode(verified.publicKey),
+    publicKeyFormat: 'cose',
+    counter: verified.newCounter,
+    deviceType: verified.credentialDeviceType,
+    backedUp: verified.credentialBackedUp,
+    lastUsedAt: Date.now()
+  })
+  return user
+}
 
-  try {
-    const clientDataJSON = base64URLDecode(response.response.clientDataJSON)
-    const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON))
-
-    if (clientData.challenge !== challengeData.challenge) {
-      throw new Error('Challenge mismatch')
-    }
-
-    if (clientData.origin !== rpConfig.origin) {
-      throw new Error('Origin mismatch')
-    }
-
-    if (clientData.type !== 'webauthn.get') {
-      throw new Error('Invalid operation type')
-    }
-
-    await writeJson(store, passkeyCredentialKey(credential.id), {
-      ...credential,
-      lastUsedAt: Date.now()
-    })
-
-    return {
-      code: RES_CODE.SUCCESS,
-      data: {
-        verified: true,
-        username: user.username,
-        token: user.token
-      }
-    }
-  } catch (error) {
-    console.error('Authentication verification error:', error)
-    return { code: RES_CODE.FAIL, message: `Verification failed: ${error.message}` }
-  }
+async function handleVerifyAuthentication(store, data, rpConfig, env) {
+  const user = await verifyAuthentication(store, data, rpConfig, 'authentication')
+  const token = await getEffectiveToken(store, env)
+  if (!token) throw new Error('Not initialized')
+  return { code: RES_CODE.SUCCESS, data: { verified: true, username: user.username, token } }
 }
 
 async function handleGenerateManagementToken(store, data, rpConfig) {
-  const { challengeId, response } = data
-
-  if (!challengeId || !response) {
-    return { code: RES_CODE.FAIL, message: 'Missing required parameters' }
-  }
-
-  const challengeData = await getAndDeleteChallenge(store, challengeId)
-  if (!challengeData) {
-    return { code: RES_CODE.FAIL, message: 'Challenge expired or invalid' }
-  }
-
-  const credential = await getCredential(store, response.id)
-  if (!credential) {
-    return { code: RES_CODE.FAIL, message: 'Credential not found' }
-  }
-
-  const user = await getUser(store, credential.userId)
-  if (!user) {
-    return { code: RES_CODE.FAIL, message: 'User not found' }
-  }
-
-  try {
-    const clientDataJSON = base64URLDecode(response.response.clientDataJSON)
-    const clientData = JSON.parse(new TextDecoder().decode(clientDataJSON))
-
-    if (clientData.challenge !== challengeData.challenge) {
-      throw new Error('Challenge mismatch')
-    }
-
-    if (clientData.origin !== rpConfig.origin) {
-      throw new Error('Origin mismatch')
-    }
-
-    if (clientData.type !== 'webauthn.get') {
-      throw new Error('Invalid operation type')
-    }
-
-    const managementToken = generateUUID()
-    await saveManagementToken(store, managementToken, credential.userId)
-
-    return {
-      code: RES_CODE.SUCCESS,
-      data: {
-        managementToken,
-        username: user.username
-      }
-    }
-  } catch (error) {
-    console.error('Management token generation error:', error)
-    return { code: RES_CODE.FAIL, message: `Verification failed: ${error.message}` }
-  }
+  const user = await verifyAuthentication(store, data, rpConfig, 'management')
+  const managementToken = generateUUID()
+  await saveManagementToken(store, managementToken, user.id)
+  return { code: RES_CODE.SUCCESS, data: { managementToken, username: user.username } }
 }
 
 async function handleListCredentials(store, data) {
@@ -656,8 +515,8 @@ async function handleDeleteCredential(store, data) {
     return { code: RES_CODE.FAIL, message: 'Unauthorized' }
   }
 
-  const isValid = await validateManagementToken(store, managementToken, userId)
-  if (!isValid) {
+  const grant = await consumeManagementToken(store, managementToken)
+  if (!grant || grant.userId !== userId) {
     return { code: RES_CODE.FAIL, message: 'Invalid or expired management token' }
   }
 
@@ -679,13 +538,7 @@ async function handleCancelChallenge(store, data) {
 }
 
 function generateUUID() {
-  if (globalThis.crypto?.randomUUID) {
-    return globalThis.crypto.randomUUID().replace(/-/g, '')
-  }
-
-  return 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'.replace(/[x]/g, () => {
-    return ((Math.random() * 16) | 0).toString(16)
-  })
+  return randomUUID().replace(/-/g, '')
 }
 
 function base64URLEncode(buffer) {
@@ -695,17 +548,6 @@ function base64URLEncode(buffer) {
     binary += String.fromCharCode(bytes[index])
   }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
-}
-
-function base64URLDecode(base64url) {
-  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-  const padding = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4))
-  const binary = atob(base64 + padding)
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index++) {
-    bytes[index] = binary.charCodeAt(index)
-  }
-  return bytes
 }
 
 async function generateUserIdFromUsername(username) {
