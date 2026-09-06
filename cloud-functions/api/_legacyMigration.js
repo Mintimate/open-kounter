@@ -1,7 +1,7 @@
 import {
-  COUNTERS_DOC_KEY,
   deleteJson,
   getStoragePrefixes,
+  legacyMigrationLockKey,
   loadSystemState,
   normalizeSystemState,
   passkeyChallengeKey,
@@ -10,6 +10,7 @@ import {
   passkeyUserKey,
   replaceAllCounterRecords,
   saveSystemState,
+  validateCounterImport,
   withBlobLock,
   writeJson
 } from './_blobStore.js'
@@ -51,16 +52,15 @@ export async function fetchLegacyBundle(request, token) {
 }
 
 export async function importLegacyBundle(store, env, bundle) {
-  return withBlobLock(store, 'locks/legacy-migration.json', async () => {
+  validateCounterImport(bundle?.counters)
+  return withBlobLock(store, legacyMigrationLockKey(), async () => {
     const prefixes = getStoragePrefixes()
-    const [deletedCounters, deletedUsers, deletedCredentials, deletedChallenges, deletedManagementTokens] = await Promise.all([
-      deletePrefix(store, prefixes.counters),
+    const [deletedUsers, deletedCredentials, deletedChallenges, deletedManagementTokens] = await Promise.all([
       deletePrefix(store, prefixes.passkeyUsers),
       deletePrefix(store, prefixes.passkeyCredentials),
       deletePrefix(store, prefixes.passkeyChallenges),
       deletePrefix(store, prefixes.passkeyManagementTokens)
     ])
-    await deleteJson(store, COUNTERS_DOC_KEY)
 
     const counters = bundle?.counters && typeof bundle.counters === 'object' ? bundle.counters : {}
     const passkey = bundle?.passkey && typeof bundle.passkey === 'object' ? bundle.passkey : {}
@@ -118,7 +118,7 @@ export async function importLegacyBundle(store, env, bundle) {
       importedCredentials: Object.keys(credentials).length,
       importedChallenges,
       importedManagementTokens,
-      deletedCounters,
+      deletedCounters: 0,
       deletedUsers,
       deletedCredentials,
       deletedChallenges,
@@ -128,6 +128,7 @@ export async function importLegacyBundle(store, env, bundle) {
 }
 
 async function deletePrefix(store, prefix) {
+  if (!prefix) throw new Error('Missing migration cleanup prefix')
   const result = await store.list({ prefix, consistency: 'strong' })
   const blobs = result.blobs || []
   await Promise.all(blobs.map(({ key }) => deleteJson(store, key)))

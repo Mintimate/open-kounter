@@ -282,6 +282,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   }
   ```
 
+**导入校验**：`data.counters` 必须为对象（允许 `{}` 清空）；计数值须为非负安全整数或仅含数字的字符串，记录形式使用 `time`，可选时间戳 `created_at` / `updated_at` 为非负安全整数。可选 `allowedDomains` 必须是字符串数组。先完整校验，再在锁内覆盖，写入失败不会因为预先删除而丢失旧计数。计数与域名配置属于两个文档，不提供跨文档事务。
+
 #### 7. 配置域名白名单
 - **URL**: `POST /api/counter`
 - **Body**:
@@ -386,11 +388,13 @@ OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中
 本项目基于 [MIT License](./LICENSE) 开源。
 
 
-## 本地验证
+## 本地验证与并发边界
 
 ```bash
 npm test
 npm run build
 ```
 
-回归测试使用内存 Blob 和本地生成的签名密钥，覆盖 Passkey、OIDC 完整绑定/登录及重复消费，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
+回归测试使用内存 Blob 和本地生成的签名密钥，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、导入失败及锁竞争，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
+
+计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。

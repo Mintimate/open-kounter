@@ -87,7 +87,8 @@
 │   ├── main.js                 # 入口
 │   ├── style.css               # ⭐ 唯一全局 CSS（@theme + 主题映射 + 基础样式）
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
-├── tests/                      # Node 内置测试：认证
+├── tests/                      # Node 内置测试：认证、存储
+├── docs/blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
 ├── index.html
@@ -427,6 +428,8 @@ export async function onRequest({ request, env }) {
 - 创建 Store：仅通过 `createOpenKounterStore(env)`，不要直接 `new BlobStore`
 - 所有 Key 必须在 `_blobStore.js` 中以**纯函数**形式导出（如 `passkeyManagementTokenKey(id)`），业务代码 import 后调用，**禁止散落字符串拼接**
 - 读：`readJson(store, key)`；写：`writeJson(store, key, value)`；删：`deleteJson(store, key)`
+- 锁通过 SDK `PreconditionFailedError` 判断条件创建冲突；只重试获取锁，不重放业务回调。禁止按 `expiresAt` 自动抢占或删除另一所有者的锁；超时报错，遗留锁按 `docs/blob-concurrency.md` 维护恢复。强一致读不是原子递增。
+- 导入先校验全部计数与域名配置，再覆盖计数文档；禁止预先删除 `system/counters.json`。旧迁移不得使用缺失前缀清理 Store。多文档操作不保证事务。
 - 强一致：核心读路径优先使用强一致选项（参见 `_blobStore.js` 内的封装），禁止业务层自行降级到最终一致
 
 ### 8.5 Edge Function 适用范围
@@ -464,6 +467,7 @@ export async function onRequest({ request, env }) {
 | `oidc/states/<编码 id>.json` | `state`, `nonce`, `mode`, `tokenHash`, `codeVerifier`, `issuer`, `clientId`, `redirectUri`, `browserHash`, `createdAt`, `expiresAt` | 5 分钟、唯一消费；`tokenHash` 仅绑定模式使用 |
 | `oidc/sessions/<编码 id>.json` | `sessionId`, `sub`, `issuer`, `boundAt`, `tokenHash`, `createdAt`, `expiresAt` | 60 秒、唯一消费；不保存实际管理员 Token |
 | `auth/consumed/<编码后的完整凭证 Key>` | `expiresAt`, `consumedAt` | 通过 `onlyIfNew` 创建；不会自动回收，维护时在凭证过期且无在途消费请求后清理 |
+| `locks/counters-document.json`, `locks/system-state.json`, `locks/passkey/users/<编码 id>.json`, `locks/legacy-migration.json` | `requestId`, `expiresAt`, `createdAt` | 所有者正常释放；`expiresAt` 仅诊断，不授权抢占，异常遗留需维护恢复 |
 
 认证库仅用于 Cloud Functions，不导入前端。为兼容现有 Bearer 登录架构，成功的 Passkey/OIDC 登录交换可以返回实际管理 Token；状态查询和其它管理响应仍禁止泄露凭证。
 
@@ -484,7 +488,7 @@ export async function onRequest({ request, env }) {
 ## 10) 质量门禁（提交前自检）
 
 ```bash
-npm test                # 认证回归必须通过
+npm test                # 认证、存储回归必须通过
 npm run build           # 构建必须通过，无新告警
 ```
 
@@ -546,6 +550,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 1**：Passkey 无密码登录
 - [x] **Phase 2**：OIDC 单点登录 + 登录页渐进式检测
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
+- [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。

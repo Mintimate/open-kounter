@@ -185,6 +185,57 @@ test('only one concurrent consumer can claim a transient authentication document
   assert.equal(results.filter(Boolean).length, 1)
 })
 
+test('an expired lock is never stolen from a still-running owner', async () => {
+  let release, entered
+  const gate = new Promise((resolve) => { release = resolve })
+  const ready = new Promise((resolve) => { entered = resolve })
+  const key = blob.legacyMigrationLockKey()
+  const first = blob.withBlobLock(store(), key, async () => { entered(); await gate }, { ttlMs: 1 })
+  await ready
+  records.get(key).expiresAt = Date.now() - 1
+  let secondEntered = false
+  await assert.rejects(blob.withBlobLock(store(), key, async () => { secondEntered = true }, { maxAttempts: 2, retryMs: 1 }), /timeout/)
+  assert.equal(secondEntered, false)
+  release(); await first
+  assert.equal(records.has(key), false)
+})
+
+test('business conflicts inside a lock are never retried as lock acquisition failures', async () => {
+  let executions = 0
+  await assert.rejects(blob.withBlobLock(store(), blob.legacyMigrationLockKey(), async () => {
+    executions++; throw new PreconditionFailedError()
+  }))
+  assert.equal(executions, 1)
+})
+
+test('import validates before writes, preserves zero and leaves original data on write failure', async () => {
+  const original = { items: { existing: { target: 'existing', time: 42 } }, version: '2.1' }
+  records.set(blob.COUNTERS_DOC_KEY, structuredClone(original))
+  for (const counters of [[], { bad: -1 }, { bad: '3junk' }, { bad: null }, { bad: { time: 2, updated_at: -1 } }]) {
+    const result = await call(counter, { action: 'import_all', data: { counters } }, adminHeaders())
+    assert.equal(result.code, 1000)
+    assert.deepEqual(records.get(blob.COUNTERS_DOC_KEY), original)
+  }
+  assert.equal(writes.length, 0)
+  const originalSet = Store.prototype.setJSON
+  mock.method(Store.prototype, 'setJSON', async function (key, value, options) {
+    if (key === blob.COUNTERS_DOC_KEY) throw new Error('Simulated write failure')
+    return originalSet.call(this, key, value, options)
+  })
+  assert.equal((await call(counter, { action: 'import_all', data: { counters: { zero: 0 } } }, adminHeaders())).code, 1000)
+  assert.deepEqual(records.get(blob.COUNTERS_DOC_KEY), original)
+  assert.equal(deletes.includes(blob.COUNTERS_DOC_KEY), false)
+  assert.equal(blob.validateCounterImport({ zero: 0 }).zero.time, 0)
+})
+
+test('legacy migration never clears unrelated OIDC/system documents', async () => {
+  const preservedKey = blob.oidcStateKey(randomUUID())
+  records.set(preservedKey, { sentinel: true })
+  await importLegacyBundle(store(), env, { counters: { page: 1 }, system: {}, passkey: {} })
+  assert.deepEqual(records.get(preservedKey), { sentinel: true })
+  assert.equal(deletes.includes(blob.COUNTERS_DOC_KEY), false)
+})
+
 test('OIDC verifies signatures, required claims, nonce and authorized party', async () => {
   const { privateKey, publicKey } = await generateKeyPair('RS256')
   const key = createLocalJWKSet({ keys: [await exportJWK(publicKey)] })
@@ -290,4 +341,26 @@ test('OIDC bind and login complete through PKCE exchange and JWKS signature veri
   assert.equal(discoveryCalls, 1, 'reuse cached discovery between authorization and callback')
   await oidcCallback({ env, request: loginRequest })
   assert.equal(tokenCalls, 2, 'replayed state cannot exchange another code')
+})
+
+test('concurrent increment requests serialize without losing accepted counts', async () => {
+  const responses = await Promise.all(Array.from({ length: 12 }, () => call(counter, { action: 'inc', target: 'page' })))
+  assert.ok(responses.every((result) => result.code === 0))
+  assert.equal(records.get(blob.COUNTERS_DOC_KEY).items.page.time, 12)
+  assert.deepEqual(responses.map((result) => result.data.time).sort((a, b) => a - b), Array.from({ length: 12 }, (_, i) => i + 1))
+})
+
+test('successful import replaces counters, preserves timestamps and updates allowed domains', async () => {
+  records.set(blob.COUNTERS_DOC_KEY, { items: { removed: { target: 'removed', time: 10 } } })
+  const result = await call(counter, { action: 'import_all', data: {
+    counters: { zero: 0, page: { time: '12', created_at: 0, updated_at: 10 } }, allowedDomains: [origin]
+  } }, adminHeaders())
+  assert.equal(result.code, 0)
+  assert.equal(result.data.imported, 2)
+  const items = records.get(blob.COUNTERS_DOC_KEY).items
+  assert.equal(items.zero.time, 0)
+  assert.equal(items.page.time, 12)
+  assert.equal(items.page.created_at, 0)
+  assert.equal(items.removed, undefined)
+  assert.deepEqual(records.get(blob.SYSTEM_STATE_KEY).allowedDomains, [origin])
 })

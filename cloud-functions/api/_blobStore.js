@@ -112,9 +112,7 @@ export async function loadCountersDocument(store) {
     return normalizeCountersDocument(existing)
   }
 
-  const empty = createEmptyCountersDocument()
-  await writeJson(store, COUNTERS_DOC_KEY, empty, { onlyIfNew: true })
-  return empty
+  return createEmptyCountersDocument()
 }
 
 export async function saveCountersDocument(store, document) {
@@ -126,9 +124,7 @@ export async function saveCountersDocument(store, document) {
 export async function updateCountersDocument(store, updater) {
   return withBlobLock(store, `${LOCKS_PREFIX}counters-document.json`, async () => {
     const current = normalizeCountersDocument((await readJson(store, COUNTERS_DOC_KEY)) || createEmptyCountersDocument())
-    const next = normalizeCountersDocument(await updater(current))
-    await saveCountersDocument(store, next)
-    return next
+    return saveCountersDocument(store, await updater(current))
   })
 }
 
@@ -162,6 +158,10 @@ export function oidcSessionKey(id) {
 
 export function consumedDocumentKey(key) {
   return `auth/consumed/${encodeKeySegment(key)}`
+}
+
+export function legacyMigrationLockKey() {
+  return `${LOCKS_PREFIX}legacy-migration.json`
 }
 
 // onlyIfNew elects exactly one consumer; read-then-delete alone is not atomic.
@@ -225,25 +225,31 @@ export async function updateCounterRecord(store, target, updater) {
   }).then((document) => document.items[target] || null)
 }
 
-export async function replaceAllCounterRecords(store, counters) {
+// Validate the whole replacement before acquiring a lock or writing anything.
+export function validateCounterImport(counters) {
+  if (!counters || typeof counters !== 'object' || Array.isArray(counters)) {
+    throw new Error('counters must be an object')
+  }
   const now = Date.now()
-  const items = Object.fromEntries(
-    Object.entries(counters || {}).map(([target, rawValue]) => {
-      if (typeof rawValue === 'object' && rawValue !== null && 'time' in rawValue) {
-        return [target, normalizeCounterRecord(target, {
-          time: Number.parseInt(rawValue.time, 10) || 0,
-          created_at: Number(rawValue.created_at) || now,
-          updated_at: Number(rawValue.updated_at) || now
-        })]
-      }
+  return Object.fromEntries(Object.entries(counters).map(([target, raw]) => {
+    if (!target || target.length > 2048) throw new Error('Invalid counter target')
+    const record = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : null
+    const value = record ? record.time : raw
+    const count = typeof value === 'number' ? value
+      : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid counter value')
+    const timestamps = {}
+    for (const field of ['created_at', 'updated_at']) {
+      const value = record?.[field] ?? now
+      if (!Number.isSafeInteger(value) || value < 0) throw new Error('Invalid counter timestamp')
+      timestamps[field] = value
+    }
+    return [target, { target, time: count, ...timestamps }]
+  }))
+}
 
-      return [target, normalizeCounterRecord(target, {
-        time: Number.parseInt(rawValue, 10) || 0,
-        created_at: now,
-        updated_at: now
-      })]
-    })
-  )
+export async function replaceAllCounterRecords(store, counters) {
+  const items = validateCounterImport(counters)
 
   const document = await updateCountersDocument(store, () => ({
     items,
@@ -285,6 +291,7 @@ export async function withBlobLock(store, lockKey, fn, options = {}) {
   const maxAttempts = options.maxAttempts || DEFAULT_LOCK_ATTEMPTS
   const requestId = generateRequestId()
 
+  let acquired = false
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       await writeJson(store, lockKey, {
@@ -292,26 +299,21 @@ export async function withBlobLock(store, lockKey, fn, options = {}) {
         expiresAt: Date.now() + ttlMs,
         createdAt: Date.now()
       }, { onlyIfNew: true })
-
-      try {
-        return await fn()
-      } finally {
-        const activeLock = await readJson(store, lockKey)
-        if (activeLock && activeLock.requestId === requestId) {
-          await deleteJson(store, lockKey)
-        }
-      }
+      acquired = true
+      break
     } catch (error) {
-      if (!isOnlyIfNewConflict(error)) {
-        throw error
-      }
-
+      if (!(error instanceof PreconditionFailedError)) throw error
+      // Expiry does not fence an old writer. Never steal/delete another owner's
+      // lock; an orphan requires recovery after all in-flight writers are stopped.
+      await sleep(retryMs + Math.floor(Math.random() * retryMs))
+    }
+  }
+  if (acquired) {
+    try {
+      return await fn()
+    } finally {
       const activeLock = await readJson(store, lockKey)
-      if (activeLock && activeLock.expiresAt && activeLock.expiresAt <= Date.now()) {
-        await deleteJson(store, lockKey)
-      } else {
-        await sleep(retryMs + Math.floor(Math.random() * retryMs))
-      }
+      if (activeLock?.requestId === requestId) await deleteJson(store, lockKey)
     }
   }
 
@@ -373,11 +375,6 @@ function generateRequestId() {
     return globalThis.crypto.randomUUID()
   }
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`
-}
-
-function isOnlyIfNewConflict(error) {
-  const message = String(error?.message || '')
-  return /onlyifnew|already exists|precondition|conflict|409/i.test(message)
 }
 
 function sleep(ms) {

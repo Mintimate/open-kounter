@@ -1,6 +1,4 @@
 import {
-  COUNTERS_DOC_KEY,
-  deleteJson,
   deleteCounterRecord,
   getCounterRecord,
   listCounterRecords,
@@ -194,7 +192,11 @@ export async function onRequest(context) {
         throw new Error('Invalid import data')
       }
 
-      const imported = await replaceAllCounters(store, body.data)
+      if (body.data.allowedDomains !== undefined && (!Array.isArray(body.data.allowedDomains)
+        || body.data.allowedDomains.some((domain) => typeof domain !== 'string'))) {
+        throw new Error('Invalid allowedDomains')
+      }
+      const imported = await replaceAllCounterRecords(store, body.data.counters)
       if (Array.isArray(body.data.allowedDomains)) {
         await updateSystemState(store, (current) => ({
           ...current,
@@ -311,11 +313,6 @@ async function incrementCountersBatch(store, requests) {
   })
 
   return results
-}
-
-async function replaceAllCounters(store, data) {
-  await deleteJson(store, COUNTERS_DOC_KEY)
-  return replaceAllCounterRecords(store, data.counters)
 }
 
 function createCounterSummary(counters, now = Date.now()) {
