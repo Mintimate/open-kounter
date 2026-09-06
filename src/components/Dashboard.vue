@@ -11,17 +11,13 @@ import SingleCounterManager from './dashboard/SingleCounterManager.vue'
 
 defineProps(['token'])
 
-const analyticsOverviewRef = ref(null)
+const summary = ref(null)
+const summaryState = ref({ loading: true, error: '' })
 const counterListRef = ref(null)
 const domainConfigRef = ref(null)
 
 const handleRefreshList = () => {
   counterListRef.value?.loadCounters()
-  analyticsOverviewRef.value?.loadSummary()
-}
-
-const handleCounterChanged = () => {
-  analyticsOverviewRef.value?.loadSummary()
 }
 
 const handleFullRefresh = () => {
@@ -32,14 +28,20 @@ const handleFullRefresh = () => {
 
 <template>
   <div class="space-y-5">
-    <AnalyticsOverview ref="analyticsOverviewRef" :token="token" />
+    <AnalyticsOverview
+      :summary="summary"
+      :loading="summaryState.loading"
+      :error="summaryState.error"
+      @refresh="handleRefreshList"
+    />
 
     <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-4">
       <div class="lg:col-span-3">
         <CounterList
           ref="counterListRef"
           :token="token"
-          @changed="handleCounterChanged"
+          @summary="summary = $event"
+          @load-state="summaryState = $event"
         />
       </div>
 

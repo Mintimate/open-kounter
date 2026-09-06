@@ -1,11 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, toRefs } from 'vue'
 
-const props = defineProps(['token'])
-
-const summary = ref(null)
-const loading = ref(false)
-const error = ref('')
+const props = defineProps(['summary', 'loading', 'error'])
+const { summary, loading, error } = toRefs(props)
+const emit = defineEmits(['refresh'])
 
 const numberFormatter = new Intl.NumberFormat('zh-CN')
 
@@ -53,33 +51,6 @@ const topPageMaximum = computed(() => Math.max(
   ...(summary.value?.topPages || []).map((item) => Number(item.count) || 0)
 ))
 
-const loadSummary = async () => {
-  loading.value = true
-  error.value = ''
-
-  try {
-    const res = await fetch('/api/counter', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.token}`
-      },
-      body: JSON.stringify({ action: 'summary' })
-    })
-    const data = await res.json()
-
-    if (data.code === 0) {
-      summary.value = data.data
-    } else {
-      error.value = data.message || '统计概览加载失败'
-    }
-  } catch (e) {
-    error.value = e.message
-  } finally {
-    loading.value = false
-  }
-}
-
 const formatNumber = (value) => numberFormatter.format(Number(value) || 0)
 
 const formatDate = (timestamp) => {
@@ -93,9 +64,6 @@ const getBarWidth = (count) => {
   return `${Math.max(4, Math.round((value / topPageMaximum.value) * 100))}%`
 }
 
-onMounted(loadSummary)
-
-defineExpose({ loadSummary })
 </script>
 
 <template>
@@ -111,7 +79,7 @@ defineExpose({ loadSummary })
         type="button"
         class="button-secondary button-compact self-start sm:self-auto"
         :disabled="loading"
-        @click="loadSummary"
+        @click="emit('refresh')"
       >
         {{ loading ? '加载中...' : '刷新概览' }}
       </button>

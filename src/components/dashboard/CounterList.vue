@@ -3,8 +3,11 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 import ConfirmModal from '../common/ConfirmModal.vue'
 
+import { createLatestRequest } from '../../utils/latestRequest.js'
+
 const props = defineProps(['token'])
-const emit = defineEmits(['changed'])
+const emit = defineEmits(['summary', 'load-state'])
+const latestRequest = createLatestRequest()
 
 const counters = ref([])
 const currentPage = ref(1)
@@ -30,49 +33,44 @@ const showDeleteModal = ref(false)
 const deletingTarget = ref('')
 const deleteLoading = ref(false)
 
-const loadCounters = async () => {
-  loading.value = true
-  error.value = ''
-
-  try {
-    const [sortBy, sortOrder] = sortOption.value.split(':')
-    const res = await fetch('/api/counter', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${props.token}`
-      },
-      body: JSON.stringify({
-        action: 'list',
-        page: currentPage.value,
-        pageSize: pageSize.value,
-        query: searchQuery.value,
-        sortBy,
-        sortOrder
-      })
+const loadCounters = () => latestRequest.run(async (signal) => {
+  const [sortBy, sortOrder] = sortOption.value.split(':')
+  const response = await fetch('/api/counter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${props.token}` },
+    signal,
+    body: JSON.stringify({
+      action: 'list', page: currentPage.value, pageSize: pageSize.value,
+      query: searchQuery.value, sortBy, sortOrder, includeSummary: true
     })
-
-    const data = await res.json()
-
-    if (data.code === 0) {
-      counters.value = data.data.items
-      totalPages.value = data.data.totalPages
-      totalItems.value = data.data.total
-      allTotal.value = data.data.allTotal
-
-      if (totalPages.value > 0 && currentPage.value > totalPages.value) {
-        currentPage.value = totalPages.value
-        await loadCounters()
-      }
-    } else {
-      error.value = data.message
+  })
+  if (!response.ok) throw new Error('列表加载失败，请重试')
+  const result = await response.json()
+  if (result.code !== 0) throw new Error(result.message || '列表加载失败')
+  return result.data
+}, {
+  onStart: () => {
+    loading.value = true
+    error.value = ''
+    emit('load-state', { loading: true, error: '' })
+  },
+  onSuccess: (data) => {
+    counters.value = data.items
+    totalPages.value = data.totalPages
+    totalItems.value = data.total
+    allTotal.value = data.allTotal
+    emit('summary', data.summary)
+    if (totalPages.value > 0 && currentPage.value > totalPages.value) {
+      currentPage.value = totalPages.value
+      return loadCounters()
     }
-  } catch (e) {
-    error.value = e.message
-  } finally {
+  },
+  onError: (cause) => { error.value = cause.message },
+  onFinally: () => {
     loading.value = false
+    emit('load-state', { loading: false, error: error.value })
   }
-}
+})
 
 const handlePageSizeChange = () => {
   currentPage.value = 1
@@ -113,7 +111,6 @@ const confirmDelete = async () => {
     if (data.code === 0) {
       showDeleteModal.value = false
       deletingTarget.value = ''
-      emit('changed')
       loadCounters()
     } else {
       error.value = data.message
@@ -159,7 +156,6 @@ const updateCounter = async () => {
 
     if (data.code === 0) {
       showEditModal.value = false
-      emit('changed')
       loadCounters()
     } else {
       editError.value = data.message || '更新失败'
@@ -187,16 +183,20 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  latestRequest.cancel()
   if (searchTimer) clearTimeout(searchTimer)
 })
 
 watch(searchQuery, () => {
+  latestRequest.cancel()
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     currentPage.value = 1
     loadCounters()
   }, 300)
 })
+
+watch(() => props.token, loadCounters)
 
 defineExpose({ loadCounters })
 </script>

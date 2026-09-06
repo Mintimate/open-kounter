@@ -241,6 +241,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   - `query`: 按 Target Key 进行不区分大小写的包含匹配。
   - `sortBy`: `target` / `count` / `created_at` / `updated_at`，默认 `updated_at`。
   - `sortOrder`: `asc` / `desc`，默认 `desc`。
+  - `includeSummary`: 布尔值，默认 `false`；为 `true` 时额外返回 `data.summary`，结构与 `summary` 接口一致，始终统计全部计数器。仪表盘列表与概览共用这次读取。
 - **响应说明**: `total` 为筛选后的数量，`allTotal` 为全部计数器数量。
 
 #### 4. 获取统计概览
@@ -395,6 +396,8 @@ npm test
 npm run build
 ```
 
-回归测试使用内存 Blob 和本地生成的签名密钥，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、导入失败及锁竞争，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
+回归测试使用内存 Blob 和本地生成的签名密钥，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、导入失败、锁竞争及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
 
 计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
+
+仪表盘以一次列表请求加载列表与概览，概览 Top 8 使用有界选择，避免全量排序。列表请求使用取消、序号校验和 15 秒超时，旧响应不会覆盖新结果。

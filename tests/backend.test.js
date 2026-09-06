@@ -228,6 +228,18 @@ test('import validates before writes, preserves zero and leaves original data on
   assert.equal(blob.validateCounterImport({ zero: 0 }).zero.time, 0)
 })
 
+test('list and summary share one counter read and keep top-k ordering', async () => {
+  const items = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`page-${i}`, { target: `page-${i}`, time: i % 9, updated_at: i, created_at: 0 }]))
+  records.set(blob.COUNTERS_DOC_KEY, { items })
+  const result = await call(counter, { action: 'list', pageSize: 4, sortBy: 'count', includeSummary: true }, adminHeaders())
+  assert.equal(result.code, 0)
+  assert.equal(result.data.items.length, 4)
+  assert.equal(reads.filter((key) => key === blob.COUNTERS_DOC_KEY).length, 1)
+  const expected = Object.values(items).sort((a, b) => b.time - a.time || a.target.localeCompare(b.target)).slice(0, 8).map((item) => item.target)
+  assert.deepEqual(result.data.summary.topPages.map((item) => item.target), expected)
+  assert.deepEqual(result.data.summary.recentlyActive.map((item) => item.target), Array.from({ length: 8 }, (_, i) => `page-${39 - i}`))
+})
+
 test('legacy migration never clears unrelated OIDC/system documents', async () => {
   const preservedKey = blob.oidcStateKey(randomUUID())
   records.set(preservedKey, { sentinel: true })

@@ -268,7 +268,6 @@ export async function listCounterTargets(store) {
 export async function listCounterRecords(store) {
   const document = await loadCountersDocument(store)
   return Object.values(document.items)
-    .sort((left, right) => (right.updated_at || 0) - (left.updated_at || 0))
 }
 
 export async function listPrefixedJson(store, prefix) {

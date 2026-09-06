@@ -143,13 +143,13 @@ export async function onRequest(context) {
         totalPages: Math.ceil(total / pageSize),
         query,
         sortBy,
-        sortOrder
+        sortOrder,
+        ...(body.includeSummary === true ? { summary: createCounterSummary(counters) } : {})
       })
     }
 
     if (action === 'get_config') {
-      await requireAuth(request, store, env)
-      const state = await loadSystemState(store)
+      const { state } = await requireAuth(request, store, env)
       return successResponse(request, {
         allowedDomains: state.allowedDomains
       })
@@ -174,8 +174,7 @@ export async function onRequest(context) {
     }
 
     if (action === 'export_all') {
-      await requireAuth(request, store, env)
-      const state = await loadSystemState(store)
+      const { state } = await requireAuth(request, store, env)
       const counters = await listCounterRecords(store)
 
       return successResponse(request, {
@@ -325,14 +324,8 @@ function createCounterSummary(counters, now = Date.now()) {
   )
   const staleBefore = now - STALE_COUNTER_MS
 
-  const topPages = [...pageCounters]
-    .sort(createCounterComparator('count', 'desc'))
-    .slice(0, SUMMARY_LIST_LIMIT)
-    .map(toCounterListItem)
-  const recentlyActive = [...pageCounters]
-    .sort(createCounterComparator('updated_at', 'desc'))
-    .slice(0, SUMMARY_LIST_LIMIT)
-    .map(toCounterListItem)
+  const topPages = selectTopCounters(pageCounters, 'count')
+  const recentlyActive = selectTopCounters(pageCounters, 'updated_at')
 
   return {
     sitePv,
@@ -347,6 +340,18 @@ function createCounterSummary(counters, now = Date.now()) {
     topPages,
     recentlyActive
   }
+}
+
+function selectTopCounters(counters, sortBy) {
+  const compare = createCounterComparator(sortBy, 'desc')
+  const selected = []
+  for (const item of counters) {
+    const index = selected.findIndex((current) => compare(item, current) < 0)
+    if (index >= 0) selected.splice(index, 0, item)
+    else if (selected.length < SUMMARY_LIST_LIMIT) selected.push(item)
+    if (selected.length > SUMMARY_LIST_LIMIT) selected.pop()
+  }
+  return selected.map(toCounterListItem)
 }
 
 function createCounterComparator(sortBy, sortOrder) {

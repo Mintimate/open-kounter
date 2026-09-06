@@ -86,8 +86,9 @@
 │   ├── App.vue                 # 根组件（登录态 + OIDC 回调处理 + 全局 layout）
 │   ├── main.js                 # 入口
 │   ├── style.css               # ⭐ 唯一全局 CSS（@theme + 主题映射 + 基础样式）
+│   ├── utils/latestRequest.js # 请求取消、超时和响应序号保护
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
-├── tests/                      # Node 内置测试：认证、存储
+├── tests/                      # Node 内置测试：认证、存储、请求乱序
 ├── docs/blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
@@ -281,6 +282,8 @@
 - 子组件**不要**直接写 `localStorage.setItem('open_kounter_token', ...)`
 - 跨组件共享数据：优先 props / emit；多层共享用 `provide / inject`
 - **不引入 Pinia**
+- 仪表盘由 `CounterList` 的 `list + includeSummary: true` 请求向 `Dashboard` 上报概览与加载状态；`AnalyticsOverview` 仅消费 props 并发出刷新事件，不额外请求数据。
+- 列表读取通过 `src/utils/latestRequest.js` 取消旧请求、校验序号并执行 15 秒超时；卸载组件必须取消请求。
 
 ### 6.3 API 调用约定
 
@@ -488,7 +491,7 @@ export async function onRequest({ request, env }) {
 ## 10) 质量门禁（提交前自检）
 
 ```bash
-npm test                # 认证、存储回归必须通过
+npm test                # 认证、存储、请求乱序回归必须通过
 npm run build           # 构建必须通过，无新告警
 ```
 
@@ -550,7 +553,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 1**：Passkey 无密码登录
 - [x] **Phase 2**：OIDC 单点登录 + 登录页渐进式检测
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
-- [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
+- [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验、列表/概览共用读取、请求乱序保护；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。
