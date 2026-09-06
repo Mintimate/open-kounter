@@ -2,10 +2,44 @@
 
 Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单、旧版 KV 一键迁移、Passkey 无密码登录、OIDC 单点登录，以及亮色 / 跟随系统 / 暗色主题切换。
 
-![Open Kounter Demo](./other/demoOfAdmin.webp)
+## 功能概览
 
-更详细的介绍和部署指南请参考：
-- [LeanCloud 遗憾谢幕：基于 EdgeOne Blob 打造高性能 PV/UV 访客统计](https://www.mintimate.cn/2026/02/14/openKounter/)
+| 功能 | 说明 |
+|---|---|
+| 访问计数 | 单个 / 批量递增，支持站点及页面自定义 Target Key |
+| 统计概览 | 累计 PV / UV、计数器数量、零值与未活跃统计、热门页面和最近活跃 |
+| 计数管理 | 搜索、排序、分页、修改计数与删除条目 |
+| 登录认证 | Token、Passkey 和 OIDC；登录页按配置与绑定状态显示入口 |
+| 数据维护 | JSON 导入导出、域名白名单、旧版 KV 迁移 |
+| 界面主题 | 亮色、跟随系统、暗色，适配桌面和移动端 |
+
+统计概览读取 `site-pv` 与 `site-uv` 作为站点累计指标。后端提供计数操作，UV 去重由接入端负责；仓库中的适配器按浏览器本地记录进行 24 小时去重，不代表跨设备的独立用户识别。
+
+## 界面预览
+
+以下图片由当前版本的实际界面截取，统计值、页面路径和账号信息均为示例数据。
+
+**暗色仪表盘**：统计概览、热门页面、计数器列表，以及右侧管理面板。
+
+![Open Kounter 暗色仪表盘：统计概览、计数列表与管理面板](./other/demoOfAdmin.webp)
+
+<details>
+<summary>查看亮色仪表盘</summary>
+
+![Open Kounter 亮色仪表盘](./other/demoOfAdminLight.webp)
+
+</details>
+
+<details>
+<summary>查看登录页：Token、Passkey 与 OIDC</summary>
+
+![Open Kounter 登录页：已绑定 Passkey 和 OIDC 时显示对应入口](./other/demoOfLogin.webp)
+
+</details>
+
+快速跳转：[部署](#edgeone-pages-上部署) · [AI 迁移 Skill](#安装-ai-skill) · [API 文档](#api-接口文档) · [环境变量](#环境变量一览) · [登录方式](#登录方式) · [升级注意事项](#升级注意事项) · [本地验证](#本地验证与并发边界)
+
+项目背景：[LeanCloud 遗憾谢幕：基于 EdgeOne Blob 打造高性能 PV/UV 访客统计](https://www.mintimate.cn/2026/02/14/openKounter/)。部署配置与接口行为以本 README 和当前代码为准。
 
 ## 安装 AI Skill
 
@@ -52,12 +86,12 @@ Open Kounter 服务地址：https://counter.example.com
 
 手动部署配置：
 
-- 框架预设：Node.js（或留空，EdgeOne 会识别 `edgeone.json`）
+- 框架预设：Vite（与 `edgeone.json` 中的 `framework: "vite"` 一致）
 - 构建命令：`npm run build`
 - 输出目录：`dist`
 - Node 版本：`22`
 
-更多 EdgeOne Pages文档：https://pages.edgeone.ai/zh/document/product-introduction
+平台文档：[Cloud Functions](https://pages.edgeone.ai/document/cloud-functions) · [Blob 存储](https://pages.edgeone.ai/document/blob-storage)。仓库保留 EdgeOne Pages 的目录及 SDK 命名，平台界面也可能显示为 EdgeOne Makers。
 
 ### 为什么从 KV 切换到 Blob
 
@@ -67,32 +101,32 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 - 域名白名单、Token、Passkey 相关状态在边缘节点之间同步时，也可能出现短暂不一致。
 - 对于计数器这类“写完就要立刻读到最新结果”的场景，KV 的全球同步延迟会直接影响可用性。
 
-现在主存储已经切换为 Blob，并在核心读取路径中使用强一致读取。这样做的目标很明确：解决 KV 全球同步存在延迟的问题，让计数、配置和认证状态在写入后能更快、更稳定地读到最新值。
+现在主存储使用 Blob，核心读取路径启用强一致模式，绕过边缘缓存读取最新写入。强一致读取不等于原子递增；并发写入仍需互斥，当前锁的恢复边界见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 
 ### 配置 Blob 存储（必需）
 
 本项目使用 Blob 作为主存储，部署后会在 cloud-functions 中自动创建并使用名为 `open-kounter` 的 Blob Store。
 
 1. **开启 Blob 能力**
-  - 在 EdgeOne Pages 控制台进入项目设置 > 存储
-  - 确认项目已开通 Blob 能力
+    - 在 EdgeOne Pages 控制台进入项目设置 > 存储
+    - 确认项目已开通 Blob 能力
 
 2. **首次访问自动创建 Store**
-  - 默认会使用 `open-kounter` 作为 Blob Store 名称
-  - 如需自定义名称，可设置环境变量 `OPEN_KOUNTER_BLOB_STORE`
+    - 默认会使用 `open-kounter` 作为 Blob Store 名称
+    - 如需自定义名称，可设置环境变量 `OPEN_KOUNTER_BLOB_STORE`
 
 3. **Passkey 域名配置（可选）**
-  - Passkey 默认使用服务端 `request.url` 的 Origin 和 hostname，不信任请求的 `Origin` / `Referer` 头；如平台内部转发地址与公开域名不同，请设置 `PASSKEY_ORIGIN=https://你的公开域名`
-  - 如需固定 RP ID 或跨环境统一配置，可设置环境变量 `PASSKEY_RP_ID`
-  - 如需自定义显示名称，可设置环境变量 `PASSKEY_RP_NAME`
+    - Passkey 默认使用服务端 `request.url` 的 Origin 和 hostname，不信任请求的 `Origin` / `Referer` 头；如平台内部转发地址与公开域名不同，请设置 `PASSKEY_ORIGIN=https://你的公开域名`
+    - 如需固定 RP ID 或跨环境统一配置，可设置环境变量 `PASSKEY_RP_ID`
+    - 如需自定义显示名称，可设置环境变量 `PASSKEY_RP_NAME`
 
 4. **OIDC 单点登录配置（可选）**
-  - 如需启用 OIDC 登录，请先在 EdgeOne Pages 环境变量中配置 OIDC 参数，并在 OIDC Provider 中把 Redirect URI 设置为 `https://你的域名/api/oidc/callback`
-  - 配置完成后，管理员先使用 Token 登录后台，在 OIDC 登录模块中绑定身份；绑定成功后，登录页会自动显示 OIDC 登录按钮
-  - 具体变量说明和使用流程见下方“环境变量一览”和“登录方式”章节
+    - 如需启用 OIDC 登录，请先在 EdgeOne Pages 环境变量中配置 OIDC 参数，并在 OIDC Provider 中把 Redirect URI 设置为 `https://你的域名/api/oidc/callback`
+    - 配置完成后，管理员先使用 Token 登录后台，在 OIDC 登录模块中绑定身份；绑定成功后，登录页会自动显示 OIDC 登录按钮
+    - 具体变量说明和使用流程见下方“环境变量一览”和“登录方式”章节
 
 5. **重新部署项目**
-  - 启用 Blob 或调整环境变量后建议重新部署
+    - 启用 Blob 或调整环境变量后建议重新部署
 
 ### 旧版 KV 迁移（可选）
 
@@ -103,7 +137,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 
 ### 初始化
 
-部署并配置完成后，访问你的项目网址，首次访问将引导你设置管理员 Token。
+部署完成后访问项目网址：未预设 `ADMIN_TOKEN` 时，按页面提示创建管理员 Token；已预设时，使用该 Token 登录。Token 登录成功后，可在后台绑定 Passkey 或 OIDC。
 
 
 ## 目录结构与文件说明
@@ -114,6 +148,11 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   └── adapter.js          # 客户端适配器，模拟 LeanCloud 行为
 ├── cloud-functions/        # 主后端逻辑 (Blob API)
 │   └── api/
+│       ├── _api.js         # 响应、CORS 与鉴权工具
+│       ├── _blobStore.js   # Store 工厂、Key、导入校验与锁
+│       ├── _legacyMigration.js # 旧 KV 导入
+│       ├── _oidc.js        # Discovery、JWKS、PKCE 和 Cookie
+│       ├── _passkey.js     # WebAuthn 验签与旧凭证兼容
 │       ├── auth.js         # 认证逻辑
 │       ├── counter.js      # 计数器读写、列表与统计聚合
 │       ├── init.js         # 初始化与迁移接口
@@ -144,7 +183,11 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   ├── App.vue             # 主应用组件
 │   ├── main.js             # 入口文件
 │   ├── style.css           # 全局样式与主题 Token
+│   ├── utils/latestRequest.js # 请求取消、超时和响应序号保护
 │   └── theme.js            # 主题解析与持久化
+├── tests/                  # 认证、导入、锁与请求乱序回归测试
+├── docs/blob-concurrency.md # Blob 并发设计与遗留锁恢复
+├── other/                  # README 的当前版本界面截图
 ├── edgeone.json            # EdgeOne 配置文件
 ├── index.html              # HTML 入口
 ├── package.json            # 项目依赖
@@ -154,11 +197,12 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 
 ## API 接口文档
 
-所有 API 的基础路径为 `/api`。
+主 API 的基础路径为 `/api`，旧 KV 迁移出口为 `/legacy-api/migrate`。JSON 响应使用 `code: 0` 表示成功、`1000` 表示失败、`1404` 表示未找到；通常 HTTP 状态为 200，调用端还须检查业务 `code`。`OPTIONS` 返回 204，OIDC 浏览器跳转使用 302。
 
 ### 公开接口 (无需认证)
 
 #### 1. 获取计数
+
 - **URL**: `GET /api/counter`
 - **参数**: `target` (必填，计数器的 Key，如 `site-pv`)
 - **响应**:
@@ -175,6 +219,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   ```
 
 #### 2. 增加计数 (自增)
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
@@ -186,6 +231,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 - **说明**: 受域名白名单限制。
 
 #### 3. 批量增加计数
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
@@ -204,6 +250,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 需要在 Header 中携带 `Authorization: Bearer <YOUR_TOKEN>`。
 
 #### 1. 设置计数器值
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
@@ -215,6 +262,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   ```
 
 #### 2. 删除计数器
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
@@ -225,6 +273,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   ```
 
 #### 3. 获取计数器列表
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
@@ -238,13 +287,14 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   }
   ```
 - **可选参数**:
-  - `query`: 按 Target Key 进行不区分大小写的包含匹配。
-  - `sortBy`: `target` / `count` / `created_at` / `updated_at`，默认 `updated_at`。
-  - `sortOrder`: `asc` / `desc`，默认 `desc`。
-  - `includeSummary`: 布尔值，默认 `false`；为 `true` 时额外返回 `data.summary`，结构与 `summary` 接口一致，始终统计全部计数器。仪表盘列表与概览共用这次读取。
+    - `query`: 按 Target Key 进行不区分大小写的包含匹配。
+    - `sortBy`: `target` / `count` / `created_at` / `updated_at`，默认 `updated_at`。
+    - `sortOrder`: `asc` / `desc`，默认 `desc`。
+    - `includeSummary`: 布尔值，默认 `false`；为 `true` 时额外返回 `data.summary`，结构与 `summary` 接口一致，始终统计全部计数器。仪表盘列表与概览共用这次读取。
 - **响应说明**: `total` 为筛选后的数量，`allTotal` 为全部计数器数量。
 
 #### 4. 获取统计概览
+
 - **URL**: `POST /api/counter`
 - **Body**: `{ "action": "summary" }`
 - **响应**:
@@ -269,43 +319,60 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 - **说明**: 直接聚合现有累计计数器，不新增 Blob Schema；热门页面与最近活跃均排除 `site-pv` 和 `site-uv`，各返回最多 8 条。
 
 #### 5. 导出所有数据
+
 - **URL**: `POST /api/counter`
 - **Body**: `{ "action": "export_all" }`
 - **响应**: 包含所有计数器数据和配置的 JSON 对象。
 
 #### 6. 导入数据
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
   {
     "action": "import_all",
-    "data": { ... } // 导出的 JSON 数据
+    "data": {
+      "counters": {
+        "site-pv": 12000,
+        "/posts/hello-world/": {
+          "time": 256,
+          "created_at": 1700000000000,
+          "updated_at": 1700086400000
+        }
+      },
+      "allowedDomains": ["https://blog.example.com"]
+    }
   }
   ```
 
 **导入校验**：`data.counters` 必须为对象（允许 `{}` 清空）；计数值须为非负安全整数或仅含数字的字符串，记录形式使用 `time`，可选时间戳 `created_at` / `updated_at` 为非负安全整数。可选 `allowedDomains` 必须是字符串数组。先完整校验，再在锁内覆盖，写入失败不会因为预先删除而丢失旧计数。计数与域名配置属于两个文档，不提供跨文档事务。
 
 #### 7. 配置域名白名单
+
 - **URL**: `POST /api/counter`
 - **Body**:
   ```json
   {
     "action": "set_config",
-    "allowedDomains": ["example.com", "*.example.com"]
+    "allowedDomains": ["https://blog.example.com", "*.example.com"]
   }
   ```
+
+白名单精确匹配项应填写包含协议的 Origin，例如 `https://blog.example.com`；它用于限制浏览器计数请求的来源，不替代管理接口的 Bearer 鉴权。
 
 ### OIDC 接口
 
 OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 
 #### 1. 发起 OIDC 授权
+
 - **登录**：`GET /api/oidc/login?mode=login`，要求当前 Issuer 已绑定，成功后返回 302。
 - **绑定**：`POST /api/oidc/login`，携带 `Authorization: Bearer <YOUR_TOKEN>`，Body 为 `{ "mode": "bind" }`。返回 `{ "code": 0, "data": { "authorizationUrl": "..." } }`，前端再跳转。
 - **安全约定**：不再接受 URL 中的管理员 Token。后端保存 5 分钟的 `state` / `nonce` / PKCE verifier 和浏览器随机值的摘要，通过 HttpOnly、Secure、SameSite=Lax Cookie 将回调绑定到发起登录的浏览器。Provider 须支持 HTTPS、OIDC Discovery/JWKS、PKCE S256，以及 `client_secret_basic` 或 `client_secret_post`。
 - 同一浏览器同时发起多个 OIDC 流程时，仅最新流程的 Cookie 有效；旧流程需重新发起。
 
 #### 2. OIDC 回调
+
 - **URL**: `GET /api/oidc/callback?code=xxx&state=yyy`
 - 验证浏览器 Cookie 和配置，唯一消费 state，再携带 PKCE verifier 换码。
 - 使用 `jose` 和 Provider JWKS 验证签名及 `iss` / `aud` / `exp` / `iat` / `nonce`；多 audience 时校验 `azp`。仅接受配置的非对称签名算法集合，不回退到未验证的 userinfo。
@@ -313,6 +380,7 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 - 登录成功返回有效期 60 秒的一次性 Session；Session 只保存身份及 Token 摘要，不保存实际管理员 Token。
 
 #### 3. 查询 / 解绑 OIDC 状态
+
 - **URL**: `POST /api/oidc/status`
 - **Body**:
   ```json
@@ -321,6 +389,7 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 - **说明**: 查询 OIDC 是否已配置、是否已绑定；解绑需携带 `Authorization: Bearer <YOUR_TOKEN>` 并传入 `{ "action": "unbind" }`。
 
 #### 4. 使用 OIDC Session 换取管理 Token
+
 - **URL**: `POST /api/auth`
 - **Body**:
   ```json
@@ -343,6 +412,7 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 | 变量名 | 必需 | 说明 |
 |--------|------|------|
 | `OPEN_KOUNTER_BLOB_STORE` | 否 | 自定义 Blob Store 名称，默认 `open-kounter` |
+| `OPEN_KOUNTER` | 否 | 旧 KV 命名空间绑定，仅在旧数据迁移期间需要；不是普通字符串变量 |
 | `ADMIN_TOKEN` | 否 | 预设管理员 Token（优先级高于 Blob 中存储的 Token） |
 | `PASSKEY_RP_ID` | 否 | Passkey RP ID，默认使用当前域名 |
 | `PASSKEY_ORIGIN` | 否 | 可信的公开 Origin，例如 `https://counter.example.com`；默认从服务端请求 URL 推导，内部转发域名不一致时必须配置 |
@@ -384,14 +454,20 @@ OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中
 
 > 登录页加载时会先进行环境检测（显示加载动画），检测完成后仅展示已配置/已绑定的登录方式，保持界面简洁。
 
-## 许可证
+## 升级注意事项
 
-本项目基于 [MIT License](./LICENSE) 开源。
+从旧版本更新前，建议通过后台导出计数器与域名配置。当前修复保留 `system/counters.json` 的 `2.1` 布局，计数数据无需迁移到新格式。
 
+- **Passkey**：旧凭证在成功验签后转换公钥格式；不可验证时使用 Token 登录后重新绑定。平台内部请求域名与公开域名不同时，设置 `PASSKEY_ORIGIN`。
+- **OIDC**：Provider 需支持 PKCE S256。绑定改为带 Bearer 鉴权的 POST，旧的 `?mode=bind&token=...` 调用方式不再接受；后台界面已适配。
+- **进行中的登录**：旧版 challenge、OIDC Session 和未经过新版验签的管理 Token 会被拒绝，重新发起登录或绑定即可。
+- **导入数据**：导入是覆盖操作；完整校验后再写入，不预先删除计数文档。多个 Blob 文档之间没有事务。
+- **遗留锁**：函数异常终止可能留下锁，当前版本不会自动抢占。恢复前必须暂停写入并确认所有在途操作已结束，按 [恢复步骤](docs/blob-concurrency.md#遗留锁恢复) 处理。
 
 ## 本地验证与并发边界
 
 ```bash
+npm ci
 npm test
 npm run build
 ```
@@ -401,3 +477,7 @@ npm run build
 计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 
 仪表盘以一次列表请求加载列表与概览，概览 Top 8 使用有界选择，避免全量排序。列表请求使用取消、序号校验和 15 秒超时，旧响应不会覆盖新结果。
+
+## 许可证
+
+本项目基于 [MIT License](./LICENSE) 开源。
