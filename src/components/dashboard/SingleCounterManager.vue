@@ -70,11 +70,13 @@ const handleGet = () => {
 
 const handleSet = () => {
   if (!target.value) return
-  if (value.value === '' || value.value === null) {
-    singleError.value = '请输入有效的数值'
+  const count = typeof value.value === 'number' ? value.value
+    : typeof value.value === 'string' && /^\d+$/.test(value.value) ? Number(value.value) : NaN
+  if (!Number.isSafeInteger(count) || count < 0) {
+    singleError.value = '请输入非负安全整数'
     return
   }
-  callApi('set', { value: parseInt(value.value) })
+  callApi('set', { value: count })
 }
 
 const handleDelete = () => {
@@ -104,6 +106,7 @@ const confirmDelete = async () => {
           <input 
             v-model="target" 
             placeholder="Target Key" 
+            maxlength="2048"
             class="form-control field-compact min-w-0 flex-1"
           />
           <button 
@@ -122,6 +125,9 @@ const confirmDelete = async () => {
             type="number" 
             v-model="value" 
             placeholder="Value"
+            min="0"
+            max="9007199254740991"
+            step="1"
             class="form-control field-compact min-w-0 flex-1"
           />
           <button 

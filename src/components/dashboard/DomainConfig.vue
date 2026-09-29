@@ -60,6 +60,7 @@ const saveConfig = async () => {
     const data = await res.json()
 
     if (data.code === 0) {
+      allowedDomains.value = data.data.allowedDomains
       configSuccess.value = '配置已保存'
       setTimeout(() => {
         configSuccess.value = ''
@@ -100,7 +101,7 @@ defineExpose({ loadConfig })
     
     <div class="mb-3 rounded-md border border-primary/20 bg-primary/10 px-3 py-2">
       <p class="text-xs leading-relaxed text-primary">
-        留空允许所有。支持通配符 <code>*</code>。
+        留空或 <code>*</code> 允许所有。填写完整来源（如 https://example.com），或用 <code>*.example.com</code> 仅允许其子域名。
       </p>
     </div>
 

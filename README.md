@@ -150,6 +150,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   └── api/
 │       ├── _api.js         # 响应、CORS 与鉴权工具
 │       ├── _blobStore.js   # Store 工厂、Key、导入校验与锁
+│       ├── _counterValidation.js # 计数参数与来源白名单校验
 │       ├── _legacyMigration.js # 旧 KV 导入
 │       ├── _oidc.js        # Discovery、JWKS、PKCE 和 Cookie
 │       ├── _passkey.js     # WebAuthn 验签与旧凭证兼容
@@ -199,6 +200,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 
 主 API 的基础路径为 `/api`，旧 KV 迁移出口为 `/legacy-api/migrate`。JSON 响应使用 `code: 0` 表示成功、`1000` 表示失败、`1404` 表示未找到；通常 HTTP 状态为 200，调用端还须检查业务 `code`。`OPTIONS` 返回 204，OIDC 浏览器跳转使用 302。
 
+**计数参数约束**：读取、递增、设置、删除及导入使用同一 Target Key 规则：必须是非空、非纯空白的字符串，长度不超过 2048；有效 Key 原样保留。计数值必须为非负安全整数（`0`～`Number.MAX_SAFE_INTEGER`），也接受仅含数字的字符串；负数、小数、混合文本和超出安全整数范围的值均被拒绝。递增溢出会报错，不写入计数文档。
+
 ### 公开接口 (无需认证)
 
 #### 1. 获取计数
@@ -244,6 +247,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   }
   ```
 - **说明**: 常用于同时更新站点总 PV 和单页 PV。受域名白名单限制。
+- **限制**: `requests` 最多 100 项，每项必须提供合法 `target`，或兼容的 `/classes/Counter/<target>` 形式 `path`。空数组返回 `[]`，不获取写锁。所有项目先校验再写入；任一项目非法或递增溢出，整批失败，不保存部分计数。
+- **响应**: `data` 为按请求顺序返回的 `{ target, time }` 数组，`time` 是该次递增后的计数。同一 target 重复出现时依次递增，调用端可以直接使用响应更新显示。
 
 ### 管理接口 (需要认证)
 
@@ -260,6 +265,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
     "value": 1000
   }
   ```
+- **限制**: `value` 遵循上述非负安全整数规则，与导入保持一致，不使用截断解析。
 
 #### 2. 删除计数器
 
@@ -345,7 +351,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   }
   ```
 
-**导入校验**：`data.counters` 必须为对象（允许 `{}` 清空）；计数值须为非负安全整数或仅含数字的字符串，记录形式使用 `time`，可选时间戳 `created_at` / `updated_at` 为非负安全整数。可选 `allowedDomains` 必须是字符串数组。先完整校验，再在锁内覆盖，写入失败不会因为预先删除而丢失旧计数。计数与域名配置属于两个文档，不提供跨文档事务。
+**导入校验**：`data.counters` 必须为对象（允许 `{}` 清空）；Key 与计数值遵循上述共同规则，记录形式使用 `time`，可选时间戳 `created_at` / `updated_at` 为非负安全整数。可选 `allowedDomains` 与白名单配置接口使用相同校验及规范化。先完整校验，再在锁内覆盖，写入失败不会因为预先删除而丢失旧计数。计数与域名配置属于两个文档，不提供跨文档事务。
 
 #### 7. 配置域名白名单
 
@@ -358,7 +364,11 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
   }
   ```
 
-白名单精确匹配项应填写包含协议的 Origin，例如 `https://blog.example.com`；它用于限制浏览器计数请求的来源，不替代管理接口的 Bearer 鉴权。
+白名单接受 HTTP(S) Origin（例如 `https://blog.example.com`）、子域通配项（例如 `*.example.com`）和 `*`。保存及导入时去掉首尾空白、规范化域名大小写与默认端口并去重；不接受带用户名/密码、非根路径、查询参数或 fragment 的配置。
+
+`*.example.com` 只匹配 `blog.example.com`、`a.blog.example.com` 等子域，不匹配 `example.com`、`evil-example.com` 或 `example.com.evil.test`；精确 Origin 同时匹配协议和端口。空数组或 `*` 允许所有来源，无 `Origin` 的请求保持兼容放行。白名单用于限制浏览器计数来源，不能替代防刷措施或管理接口的 Bearer 鉴权。
+
+读取历史白名单时，无效条目不参与匹配、不阻断其余合法条目，也不会被自动删除；保存配置或通过 `import_all` 导入时仍需修正全部无效条目。
 
 ### OIDC 接口
 
@@ -462,6 +472,7 @@ OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中
 - **OIDC**：Provider 需支持 PKCE S256。绑定改为带 Bearer 鉴权的 POST，旧的 `?mode=bind&token=...` 调用方式不再接受；后台界面已适配。
 - **进行中的登录**：旧版 challenge、OIDC Session 和未经过新版验签的管理 Token 会被拒绝，重新发起登录或绑定即可。
 - **导入数据**：导入是覆盖操作；完整校验后再写入，不预先删除计数文档。多个 Blob 文档之间没有事务。
+- **参数校验**：设置计数与导入统一使用非负安全整数，批量递增最多 100 项；不再接受截断后有效的混合文本。历史数据中的非法计数或白名单需修正后再导入，升级不会自动清理或迁移已有数据。
 - **遗留锁**：函数异常终止可能留下锁，当前版本不会自动抢占。恢复前必须暂停写入并确认所有在途操作已结束，按 [恢复步骤](docs/blob-concurrency.md#遗留锁恢复) 处理。
 
 ## 本地验证与并发边界
@@ -472,7 +483,7 @@ npm test
 npm run build
 ```
 
-回归测试使用内存 Blob 和本地生成的签名密钥，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、导入失败、锁竞争及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
+回归测试使用内存 Blob、本地生成的签名密钥和浏览器请求模拟，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、计数及白名单校验、导入失败、锁竞争及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
 
 计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 

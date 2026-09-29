@@ -50,6 +50,7 @@
 │   └── api/
 │       ├── _api.js             # 通用响应、CORS、鉴权工具
 │       ├── _blobStore.js       # Blob Store 工厂 + Key 命名规则 + 读写工具
+│       ├── _counterValidation.js # 计数参数与来源白名单统一校验
 │       ├── _oidc.js            # OIDC Discovery/JWKS、PKCE、Cookie 与 Token 校验
 │       ├── _passkey.js         # WebAuthn 验签、可信 Origin 与旧凭证公钥兼容
 │       ├── _legacyMigration.js # 旧 KV → Blob 迁移逻辑
@@ -434,6 +435,9 @@ export async function onRequest({ request, env }) {
 - 锁通过 SDK `PreconditionFailedError` 判断条件创建冲突；只重试获取锁，不重放业务回调。禁止按 `expiresAt` 自动抢占或删除另一所有者的锁；超时报错，遗留锁按 `docs/blob-concurrency.md` 维护恢复。强一致读不是原子递增。
 - 导入先校验全部计数与域名配置，再覆盖计数文档；禁止预先删除 `system/counters.json`。旧迁移不得使用缺失前缀清理 Store。多文档操作不保证事务。
 - 强一致：核心读路径优先使用强一致选项（参见 `_blobStore.js` 内的封装），禁止业务层自行降级到最终一致
+- 计数及来源白名单校验集中在 `_counterValidation.js`。计数读取、写入和导入统一校验 Target：非空、非纯空白字符串，长度不超过 2048，有效 Key 原样保留。通过自有属性访问和安全属性写入处理 `__proto__` 等合法字符串 Key，不依赖对象原型链。
+- `set` 与导入统一接受非负安全整数或纯数字字符串；递增检查溢出。`batch_inc` 最多 100 项，空批次返回 `[]` 且不持锁，全部项目校验通过后才获取锁；任何项目失败不得写入部分计数。
+- `set_config` 与 `import_all` 使用相同白名单校验及规范化：HTTP(S) Origin、`*.example.com` 或 `*`；去空白、规范化并去重，拒绝凭证、非根路径、查询及 fragment。通配项仅按 hostname 的点边界匹配子域，不匹配根域或近似后缀域名。空白名单、`*` 和无 Origin 的兼容行为保留；来源白名单不替代鉴权或防刷。
 
 ### 8.5 Edge Function 适用范围
 
@@ -554,6 +558,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 2**：OIDC 单点登录 + 登录页渐进式检测
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
 - [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验、列表/概览共用读取、请求乱序保护；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
+- [x] **计数校验修复**：统一计数/白名单校验及批量上限，保证写入值可通过导入校验。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。

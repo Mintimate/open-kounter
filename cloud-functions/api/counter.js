@@ -10,13 +10,18 @@ import {
 } from './_blobStore.js'
 import {
   createStore,
-  failResponse,
   jsonResponse,
   optionsResponse,
   requireAuth,
   RES_CODE,
   successResponse
 } from './_api.js'
+import {
+  isCounterOriginAllowed,
+  normalizeAllowedDomains,
+  validateCounterTarget,
+  validateCounterValue
+} from './_counterValidation.js'
 import { importLegacyBundle, migrateFromLegacy } from './_legacyMigration.js'
 
 const STALE_COUNTER_DAYS = 30
@@ -24,6 +29,7 @@ const STALE_COUNTER_MS = STALE_COUNTER_DAYS * 24 * 60 * 60 * 1000
 const SUMMARY_LIST_LIMIT = 8
 const SITE_COUNTER_TARGETS = new Set(['site-pv', 'site-uv'])
 const SORT_FIELDS = new Set(['count', 'created_at', 'target', 'updated_at'])
+const MAX_BATCH_SIZE = 100
 
 export async function onRequest(context) {
   const { request, env } = context
@@ -38,10 +44,7 @@ export async function onRequest(context) {
     const url = new URL(request.url)
 
     if (request.method === 'GET') {
-      const target = url.searchParams.get('target')
-      if (!target) {
-        return failResponse(request, 'Missing target')
-      }
+      const target = validateCounterTarget(url.searchParams.get('target'))
 
       const data = await getCounterRecord(store, target)
       return successResponse(request, {
@@ -60,9 +63,7 @@ export async function onRequest(context) {
     const { action, target, requests, value, legacyToken, legacyBundle } = body
 
     if (action === 'inc') {
-      if (!target) {
-        throw new Error('Missing target')
-      }
+      validateCounterTarget(target)
 
       if (!await checkOriginAllowed(request, store)) {
         throw new Error('Origin not allowed')
@@ -74,17 +75,8 @@ export async function onRequest(context) {
 
     if (action === 'set') {
       await requireAuth(request, store, env)
-      if (!target) {
-        throw new Error('Missing target')
-      }
-      if (value === undefined) {
-        throw new Error('Missing value')
-      }
-
-      const parsedValue = Number.parseInt(value, 10)
-      if (Number.isNaN(parsedValue)) {
-        throw new Error('Invalid value')
-      }
+      validateCounterTarget(target)
+      const parsedValue = validateCounterValue(value)
 
       const next = await updateCounterRecord(store, target, (current) => {
         const now = Date.now()
@@ -105,9 +97,7 @@ export async function onRequest(context) {
 
     if (action === 'delete') {
       await requireAuth(request, store, env)
-      if (!target) {
-        throw new Error('Missing target')
-      }
+      validateCounterTarget(target)
 
       await deleteCounterRecord(store, target)
       return successResponse(request, { deleted: true, target })
@@ -157,10 +147,7 @@ export async function onRequest(context) {
 
     if (action === 'set_config') {
       await requireAuth(request, store, env)
-      const { allowedDomains } = body
-      if (!Array.isArray(allowedDomains)) {
-        throw new Error('allowedDomains must be an array')
-      }
+      const allowedDomains = normalizeAllowedDomains(body.allowedDomains)
 
       const state = await updateSystemState(store, (current) => ({
         ...current,
@@ -191,15 +178,13 @@ export async function onRequest(context) {
         throw new Error('Invalid import data')
       }
 
-      if (body.data.allowedDomains !== undefined && (!Array.isArray(body.data.allowedDomains)
-        || body.data.allowedDomains.some((domain) => typeof domain !== 'string'))) {
-        throw new Error('Invalid allowedDomains')
-      }
+      const allowedDomains = body.data.allowedDomains === undefined
+        ? undefined : normalizeAllowedDomains(body.data.allowedDomains)
       const imported = await replaceAllCounterRecords(store, body.data.counters)
-      if (Array.isArray(body.data.allowedDomains)) {
+      if (allowedDomains !== undefined) {
         await updateSystemState(store, (current) => ({
           ...current,
-          allowedDomains: body.data.allowedDomains,
+          allowedDomains,
           updatedAt: Date.now()
         }))
       }
@@ -216,20 +201,19 @@ export async function onRequest(context) {
     }
 
     if (action === 'batch_inc') {
-      if (!Array.isArray(requests)) {
-        throw new Error('Invalid requests array')
-      }
+      const targets = validateBatchTargets(requests)
 
       if (!await checkOriginAllowed(request, store)) {
         throw new Error('Origin not allowed')
       }
 
-      const results = await incrementCountersBatch(store, requests)
+      const results = await incrementCountersBatch(store, targets)
 
       return successResponse(request, results)
     }
 
-    if (target) {
+    if (target !== undefined) {
+      validateCounterTarget(target)
       const data = await getCounterRecord(store, target)
       return successResponse(request, {
         time: data ? data.time : 0,
@@ -251,25 +235,27 @@ async function incrementCounter(store, target) {
     const now = Date.now()
     return {
       target,
-      time: (current?.time || 0) + 1,
+      time: validateCounterValue(validateCounterValue(current?.time ?? 0) + 1),
       created_at: current?.created_at || now,
       updated_at: now
     }
   })
 }
 
-async function incrementCountersBatch(store, requests) {
-  const normalizedRequests = requests.map((item) => {
-    let currentTarget = item.target
-    if (!currentTarget && item.path) {
-      const match = item.path.match(/\/classes\/Counter\/(.+)$/)
-      if (match) {
-        currentTarget = match[1]
-      }
-    }
-    return currentTarget || null
+function validateBatchTargets(requests) {
+  if (!Array.isArray(requests) || requests.length > MAX_BATCH_SIZE) {
+    throw new Error(`requests must be an array with at most ${MAX_BATCH_SIZE} items`)
+  }
+  return requests.map((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Invalid batch item')
+    const target = item.target !== undefined ? item.target
+      : typeof item.path === 'string' ? item.path.match(/\/classes\/Counter\/(.+)$/)?.[1] : undefined
+    return validateCounterTarget(target)
   })
+}
 
+async function incrementCountersBatch(store, targets) {
+  if (targets.length === 0) return []
   const results = []
   await updateCountersDocument(store, (current) => {
     const now = Date.now()
@@ -281,13 +267,8 @@ async function incrementCountersBatch(store, requests) {
       updatedAt: now
     }
 
-    for (const target of normalizedRequests) {
-      if (!target) {
-        results.push(null)
-        continue
-      }
-
-      const record = next.items[target] || {
+    for (const target of targets) {
+      const record = Object.hasOwn(next.items, target) ? next.items[target] : {
         target,
         time: 0,
         created_at: now,
@@ -296,12 +277,14 @@ async function incrementCountersBatch(store, requests) {
 
       const updated = {
         target,
-        time: (record.time || 0) + 1,
+        time: validateCounterValue(validateCounterValue(record.time) + 1),
         created_at: record.created_at || now,
         updated_at: now
       }
 
-      next.items[target] = updated
+      Object.defineProperty(next.items, target, {
+        value: updated, enumerable: true, configurable: true, writable: true
+      })
       results.push({
         target,
         time: updated.time
@@ -388,21 +371,7 @@ async function checkOriginAllowed(request, store) {
   }
 
   const state = await loadSystemState(store)
-  const allowedDomains = state.allowedDomains
-  if (!allowedDomains || allowedDomains.length === 0) {
-    return true
-  }
-
-  for (const domain of allowedDomains) {
-    if (domain === '*' || origin === domain) {
-      return true
-    }
-    if (domain.startsWith('*.') && origin.endsWith(domain.slice(2))) {
-      return true
-    }
-  }
-
-  return false
+  return isCounterOriginAllowed(origin, state.allowedDomains)
 }
 
 export default { onRequest }

@@ -376,3 +376,176 @@ test('successful import replaces counters, preserves timestamps and updates allo
   assert.equal(items.removed, undefined)
   assert.deepEqual(records.get(blob.SYSTEM_STATE_KEY).allowedDomains, [origin])
 })
+
+test('set and import reject invalid counts before any writes and accepted values round-trip through backup', async () => {
+  const invalidValues = [-1, 1.5, '12junk', '1.5', '1e3', '', ' 12 ', true, null, {}, [], Number.MAX_SAFE_INTEGER + 1, '9007199254740992']
+  for (const value of invalidValues) {
+    assert.equal((await call(counter, { action: 'set', target: 'page', value }, adminHeaders())).code, 1000)
+    assert.equal((await call(counter, { action: 'import_all', data: { counters: { page: value } } }, adminHeaders())).code, 1000)
+  }
+  assert.equal(writes.length, 0)
+  for (const [target, value] of Object.entries({ zero: 0, numericString: '0012', maximum: Number.MAX_SAFE_INTEGER })) {
+    assert.equal((await call(counter, { action: 'set', target, value }, adminHeaders())).code, 0)
+  }
+  const exported = await call(counter, { action: 'export_all' }, adminHeaders())
+  assert.equal(exported.code, 0)
+  assert.equal((await call(counter, { action: 'import_all', data: exported.data }, adminHeaders())).code, 0)
+  const restored = await call(counter, { action: 'export_all' }, adminHeaders())
+  assert.deepEqual(restored.data.counters, exported.data.counters)
+  assert.equal(restored.data.counters.numericString.time, 12)
+})
+
+test('counter targets are validated across reads, writes, batch and import before storage mutation', async () => {
+  const invalidTargets = [undefined, null, '', ' \t ', 1, true, {}, [], 'x'.repeat(2049)]
+  for (const target of invalidTargets) {
+    for (const action of ['inc', 'set', 'delete', 'get']) {
+      const result = await call(counter, { action, target, value: 1 }, adminHeaders())
+      assert.equal(result.code, 1000)
+    }
+    assert.equal((await call(counter, { action: 'batch_inc', requests: [{ target }] })).code, 1000)
+  }
+  for (const target of ['', ' \t ', 'x'.repeat(2049)]) {
+    const request = new Request(`${origin}/api/counter?${new URLSearchParams({ target })}`)
+    assert.equal((await (await counter({ env, request })).json()).code, 1000)
+    const counters = { [target]: 1 }
+    assert.equal((await call(counter, { action: 'import_all', data: { counters } }, adminHeaders())).code, 1000)
+  }
+  assert.equal(writes.length, 0)
+  assert.equal(reads.includes(blob.COUNTERS_DOC_KEY), false)
+  const target = 'x'.repeat(2048)
+  assert.equal((await call(counter, { action: 'inc', target })).code, 0)
+  const request = new Request(`${origin}/api/counter?${new URLSearchParams({ target })}`)
+  const result = await (await counter({ env, request })).json()
+  assert.equal(result.data.target, target)
+  assert.equal(result.data.time, 1)
+})
+
+test('batch validates every item and its size before acquiring a lock', async () => {
+  const invalidRequests = [null, {}, [null], [[]], [{}], [{ path: 12 }], [{ path: '/wrong/page' }],
+    [{ target: 'valid' }, { target: '' }], [{ target: 1, path: '/classes/Counter/fallback' }],
+    Array.from({ length: 101 }, () => ({ target: 'page' }))]
+  for (const requests of invalidRequests) {
+    assert.equal((await call(counter, { action: 'batch_inc', requests })).code, 1000)
+  }
+  assert.equal(writes.length, 0)
+  assert.deepEqual((await call(counter, { action: 'batch_inc', requests: [] })).data, [])
+  assert.equal(writes.length, 0, 'an empty batch does not acquire a lock')
+  const requests = Array.from({ length: 100 }, (_, index) => index % 2
+    ? { target: 'page' } : { path: '/1.1/classes/Counter/page' })
+  const result = await call(counter, { action: 'batch_inc', requests })
+  assert.equal(result.code, 0)
+  assert.deepEqual(result.data.map((item) => item.time), Array.from({ length: 100 }, (_, index) => index + 1))
+  assert.equal(writes.filter((key) => key === blob.COUNTERS_DOC_KEY).length, 1)
+})
+
+test('single and repeated batch increments reject overflow without committing partial counts', async () => {
+  const original = { items: {
+    page: { target: 'page', time: 10, created_at: 1, updated_at: 1 },
+    maximum: { target: 'maximum', time: Number.MAX_SAFE_INTEGER, created_at: 1, updated_at: 1 },
+    almost: { target: 'almost', time: Number.MAX_SAFE_INTEGER - 1, created_at: 1, updated_at: 1 }
+  }, updatedAt: 1, version: '2.1' }
+  records.set(blob.COUNTERS_DOC_KEY, structuredClone(original))
+  for (const body of [
+    { action: 'inc', target: 'maximum' },
+    { action: 'batch_inc', requests: [{ target: 'page' }, { target: 'maximum' }] },
+    { action: 'batch_inc', requests: [{ target: 'almost' }, { target: 'almost' }] }
+  ]) {
+    assert.equal((await call(counter, body)).code, 1000)
+    assert.deepEqual(records.get(blob.COUNTERS_DOC_KEY), original)
+  }
+  assert.equal(writes.includes(blob.COUNTERS_DOC_KEY), false)
+  assert.equal((await call(counter, { action: 'inc', target: 'almost' })).data.time, Number.MAX_SAFE_INTEGER)
+})
+
+test('prototype property names remain ordinary counter targets through every operation', async () => {
+  const targets = ['__proto__', 'constructor', 'toString', 'hasOwnProperty']
+  for (const target of targets) {
+    assert.equal((await call(counter, { target })).data.time, 0, 'inherited properties are not counters')
+  }
+  const initial = await call(counter, { action: 'batch_inc', requests: targets.map((target) => ({ target })) })
+  assert.deepEqual(initial.data.map((item) => item.time), [1, 1, 1, 1])
+  assert.equal((await call(counter, { action: 'delete', target: '__proto__' }, adminHeaders())).code, 0)
+  assert.equal((await call(counter, { action: 'inc', target: '__proto__' })).data.time, 1)
+  const result = await call(counter, { action: 'batch_inc', requests: targets.flatMap((target) => [{ target }, { target }]) })
+  assert.equal(result.code, 0)
+  assert.deepEqual(result.data.map((item) => item.time), targets.flatMap(() => [2, 3]))
+  assert.equal((await call(counter, { action: 'set', target: '__proto__', value: 5 }, adminHeaders())).data.time, 5)
+  const exported = await call(counter, { action: 'export_all' }, adminHeaders())
+  assert.deepEqual(Object.keys(exported.data.counters).sort(), targets.toSorted())
+  assert.equal((await call(counter, { action: 'import_all', data: exported.data }, adminHeaders())).code, 0)
+  const listed = await call(counter, { action: 'list', includeSummary: true }, adminHeaders())
+  assert.equal(listed.code, 0)
+  assert.equal(listed.data.total, 4)
+  assert.equal(listed.data.summary.totalCounters, 4)
+  for (const target of targets) {
+    assert.equal(Object.hasOwn(records.get(blob.COUNTERS_DOC_KEY).items, target), true)
+    assert.equal((await call(counter, { action: 'delete', target }, adminHeaders())).code, 0)
+    assert.equal((await call(counter, { target })).data.time, 0)
+  }
+  assert.deepEqual(Object.keys(records.get(blob.COUNTERS_DOC_KEY).items), [])
+})
+
+test('domain configuration and imports use the same normalization and reject invalid entries without writes', async () => {
+  const invalidDomains = [null, 'https://example.com', [null], [42], [''], ['example.com'], ['ftp://example.com'],
+    [`https://user:${randomUUID()}@example.com`], ['https://@example.com'], ['https://example.com/path'], ['https://example.com/a/..'],
+    ['https://example.com?'], ['https://example.com#'], ['https://*.example.com'], ['https://example.com\\evil'],
+    ['*.example.com:443'], ['*.example.com/path'], ['*.*.example.com'], ['*.-example.com'], ['https://example.com', {}]]
+  for (const allowedDomains of invalidDomains) {
+    assert.equal((await call(counter, { action: 'set_config', allowedDomains }, adminHeaders())).code, 1000)
+    assert.equal((await call(counter, { action: 'import_all', data: { counters: { page: 1 }, allowedDomains } }, adminHeaders())).code, 1000)
+  }
+  assert.equal(writes.length, 0)
+  const allowedDomains = [' HTTPS://BLOG.Example.COM:443/ ', 'https://blog.example.com', ' *.Example.COM ', 'http://localhost:8080/', '*']
+  const expected = ['https://blog.example.com', '*.example.com', 'http://localhost:8080', '*']
+  const configured = await call(counter, { action: 'set_config', allowedDomains }, adminHeaders())
+  assert.deepEqual(configured.data.allowedDomains, expected)
+  assert.equal((await call(counter, { action: 'import_all', data: { counters: {}, allowedDomains } }, adminHeaders())).code, 0)
+  assert.deepEqual(records.get(blob.SYSTEM_STATE_KEY).allowedDomains, expected)
+})
+
+test('wildcard origins match subdomains at a hostname boundary and preserve exact origin ports', async () => {
+  const allowedDomains = ['*.example.com', 'https://exact.example.net:8443', 'http://localhost:8080']
+  assert.equal((await call(counter, { action: 'set_config', allowedDomains }, adminHeaders())).code, 0)
+  for (const Origin of ['https://blog.example.com', 'http://nested.blog.example.com:8080', 'https://exact.example.net:8443', 'http://localhost:8080']) {
+    assert.equal((await call(counter, { action: 'inc', target: 'page' }, { Origin })).code, 0)
+  }
+  const writeCount = writes.length
+  for (const Origin of ['https://example.com', 'https://evil-example.com', 'https://badexample.com', 'https://example.com.attacker.test',
+    'https://exact.example.net', 'http://exact.example.net:8443', 'http://localhost:8081', 'null', 'https://blog.example.com/path']) {
+    assert.equal((await call(counter, { action: 'inc', target: 'page' }, { Origin })).code, 1000)
+    assert.equal((await call(counter, { action: 'batch_inc', requests: [{ target: 'page' }] }, { Origin })).code, 1000)
+  }
+  assert.equal(writes.length, writeCount)
+  const noOrigin = new Request(`${origin}/api/counter`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'inc', target: 'page' })
+  })
+  assert.equal((await (await counter({ env, request: noOrigin })).json()).code, 0)
+  for (const domains of [[], ['*']]) {
+    assert.equal((await call(counter, { action: 'set_config', allowedDomains: domains }, adminHeaders())).code, 0)
+    assert.equal((await call(counter, { action: 'inc', target: 'page' }, { Origin: 'https://other.example' })).code, 0)
+  }
+})
+
+test('invalid legacy domains do not block valid entries or silently allow unmatched origins', async () => {
+  const scenarios = [
+    { domains: ['https://allowed.example', 'old-bad-entry'], allowed: ['https://allowed.example'], denied: ['https://evil-allowed.example'] },
+    { domains: [null, '*.example.com', 'old-bad-entry'], allowed: ['https://blog.example.com'], denied: ['https://evil-example.com', 'https://example.com'] },
+    { domains: ['old-bad-entry', '*'], allowed: ['https://any.example'], denied: [] },
+    { domains: ['*', 'old-bad-entry'], allowed: ['https://any.example'], denied: [] },
+    { domains: ['old-bad-entry', 42], allowed: [], denied: ['https://any.example'] }
+  ]
+  for (const { domains, allowed, denied } of scenarios) {
+    const originalState = { allowedDomains: domains, updatedAt: 1 }
+    records.set(blob.SYSTEM_STATE_KEY, structuredClone(originalState))
+    for (const Origin of allowed) {
+      assert.equal((await call(counter, { action: 'inc', target: 'page' }, { Origin })).code, 0)
+    }
+    const writeCount = writes.length
+    for (const Origin of denied) {
+      assert.equal((await call(counter, { action: 'inc', target: 'page' }, { Origin })).code, 1000)
+    }
+    assert.equal(writes.length, writeCount)
+    assert.deepEqual(records.get(blob.SYSTEM_STATE_KEY), originalState)
+  }
+  assert.equal(writes.includes(blob.SYSTEM_STATE_KEY), false)
+})

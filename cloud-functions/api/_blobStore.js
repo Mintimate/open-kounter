@@ -1,5 +1,7 @@
 import { getStore, PreconditionFailedError } from '@edgeone/pages-blob'
 
+import { validateCounterTarget, validateCounterValue } from './_counterValidation.js'
+
 const DEFAULT_STORE_NAME = 'open-kounter'
 const STRONG_CONSISTENCY = 'strong'
 const SYSTEM_STATE_KEY = 'system/state.json'
@@ -183,8 +185,9 @@ export async function consumeTransientJson(store, key) {
 }
 
 export async function getCounterRecord(store, target) {
+  validateCounterTarget(target)
   const document = await loadCountersDocument(store)
-  return document.items[target] || null
+  return Object.hasOwn(document.items, target) ? document.items[target] : null
 }
 
 export async function setCounterRecord(store, target, value) {
@@ -192,6 +195,7 @@ export async function setCounterRecord(store, target, value) {
 }
 
 export async function deleteCounterRecord(store, target) {
+  validateCounterTarget(target)
   await updateCountersDocument(store, (current) => {
     const next = {
       ...current,
@@ -204,8 +208,9 @@ export async function deleteCounterRecord(store, target) {
 }
 
 export async function updateCounterRecord(store, target, updater) {
+  validateCounterTarget(target)
   return updateCountersDocument(store, (current) => {
-    const currentRecord = current.items[target] || null
+    const currentRecord = Object.hasOwn(current.items, target) ? current.items[target] : null
     const nextRecord = normalizeCounterRecord(target, updater(currentRecord))
     const next = {
       ...current,
@@ -216,13 +221,15 @@ export async function updateCounterRecord(store, target, updater) {
     }
 
     if (nextRecord) {
-      next.items[target] = nextRecord
+      Object.defineProperty(next.items, target, {
+        value: nextRecord, enumerable: true, configurable: true, writable: true
+      })
     } else {
       delete next.items[target]
     }
 
     return next
-  }).then((document) => document.items[target] || null)
+  }).then((document) => Object.hasOwn(document.items, target) ? document.items[target] : null)
 }
 
 // Validate the whole replacement before acquiring a lock or writing anything.
@@ -232,12 +239,10 @@ export function validateCounterImport(counters) {
   }
   const now = Date.now()
   return Object.fromEntries(Object.entries(counters).map(([target, raw]) => {
-    if (!target || target.length > 2048) throw new Error('Invalid counter target')
+    validateCounterTarget(target)
     const record = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : null
     const value = record ? record.time : raw
-    const count = typeof value === 'number' ? value
-      : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN
-    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid counter value')
+    const count = validateCounterValue(value)
     const timestamps = {}
     for (const field of ['created_at', 'updated_at']) {
       const value = record?.[field] ?? now
