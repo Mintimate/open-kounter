@@ -166,6 +166,15 @@ export function legacyMigrationLockKey() {
   return `${LOCKS_PREFIX}legacy-migration.json`
 }
 
+export function challengeCleanupStateKey() {
+  return 'system/maintenance/passkey-challenges.json'
+}
+
+export async function listPrefixedKeysPage(store, prefix, cursor = '') {
+  if (!prefix) throw new Error('Missing storage prefix')
+  return store.list({ prefix, cursor, limit: 100, paginate: false, consistency: STRONG_CONSISTENCY })
+}
+
 // onlyIfNew elects exactly one consumer; read-then-delete alone is not atomic.
 // Receipts must not be removed while a request that read the original can still run.
 export async function consumeTransientJson(store, key) {

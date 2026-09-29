@@ -43,6 +43,14 @@ Challenge、OIDC state/session 和管理凭证通过 `auth/consumed/<编码后�
 
 新建 Challenge 使用独立随机 ID 和 `onlyIfNew`，新流程不续期、复用或删除其它流程的 ID。前端在中断时尽力按本次 ID 取消；服务器通过原有消费回执保证同一 Challenge 只能成功消费一次。不同流程可并行，凭证计数器更新仍使用用户锁，严格计数器不接受已被更新值超越的旧断言。注册提交也串行执行，保持重新绑定替换旧凭证的语义。
 
+管理员可调用 `POST /api/maintenance/challenges`，携带现有 Bearer Token，每次最多检查 100 条，仅删除已过期至少 60 秒的 `passkey/challenges/` 原文档。扫描断点保存在 `system/maintenance/passkey-challenges.json`：`cursor` 为 `null` 或 `{ page, afterKey }`，分别记录 SDK 原始游标与本页已处理位置；`updatedAt` 记录更新时间。完成全扫后断点归零。
+
+这不是消费回执回收：`auth/consumed/` 仍保留。已完成消费的验证使用内存中的 Challenge；未完成消费的过期请求会被过期检查拒绝。删除过期原文档不会撤销已完成消费的验证，也不会允许相同凭证重复消费。用户历史 `currentChallengeId` 字段不再承担单流程限制，扫描不修改用户文档；消费或取消同 ID 时才清理匹配的旧引用。
+
+旧 KV 导入可能重写原 ID，因此清理和显式取消与迁移共用 `locks/legacy-migration.json`，禁止仅检查锁是否存在后无锁删除。回收只尝试获取一次锁，失败可稍后重试；不可自动清理遗留锁。回收约 10 秒后停止启动新的操作，但会等待已开始的读写完成再释放锁，不能把预算耗尽视为在途存储操作已经停止。函数仍可能因平台终止留下锁，恢复规则不变。
+
+读取或删除暂时失败会保留重试位置，允许重复调用；坏 JSON 留存并跳过，下一轮扫描再检查。每次请求返回 `scanned`、`deleted`、`skipped`、`failed`、`hasMore`，`hasMore: true` 表示还需继续调用。过期仅决定文档失效，物理删除由取消、管理员手动调用触发。
+
 ## 高并发下一阶段选项
 
 | 方案 | 原子更新与恢复 | 代价与待确认项 |

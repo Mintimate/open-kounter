@@ -153,6 +153,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │       ├── _api.js         # 响应、CORS 与鉴权工具
 │       ├── _blobStore.js   # Store 工厂、Key、导入校验与锁
 │       ├── _counterValidation.js # 计数参数与来源白名单校验
+│       ├── _challengeCleanup.js # 过期 Challenge 分批扫描与断点
 │       ├── _legacyMigration.js # 旧 KV 导入
 │       ├── _oidc.js        # Discovery、JWKS、PKCE 和 Cookie
 │       ├── _passkey.js     # WebAuthn 验签与旧凭证兼容
@@ -160,6 +161,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │       ├── counter.js      # 计数器读写、列表与统计聚合
 │       ├── init.js         # 初始化与迁移接口
 │       ├── passkey.js      # Passkey 相关逻辑
+│       ├── maintenance/
+│       │   └── challenges.js # 管理员手动清理
 │       └── oidc/           # OIDC 单点登录
 │           ├── login.js    # OIDC 登录发起
 │           ├── callback.js # OIDC 回调处理
@@ -428,6 +431,27 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 - 前端在取消、失败、卸载或 `pagehide` 时，尽力调用 `POST /api/passkey`，Body 为 `{ "action": "cancelChallenge", "data": { "challengeId": "<本次 ID>" } }`。取消仅针对该 ID，可重复调用；ID 为 1～128 位字母、数字、下划线或连字符。取消未过期 Challenge 时仍保留一次性消费回执；已过期原文档可以直接清理。调用端必须持有本次生成响应中的 ID，不能按用户名取消其它流程。
 - 前端清理请求使用独立的 5 秒超时，离开页面使用 `keepalive`；不会阻塞下一次重试。生成选项最多等待 15 秒，以便清理取消后迟到的 ID。无法收到 ID、断网或浏览器终止时，仍可能遗留原文档。验证成功不重复取消，验签请求不自动重试。
 
+#### 回收过期 Challenge
+
+- **URL**：`POST /api/maintenance/challenges`
+- **手动鉴权**：`Authorization: Bearer <管理员 Token>`，复用管理 API 鉴权；Body 可传 `{}`。
+- 调用方不能指定清理前缀、Key 或过期时间。
+- **响应示例**：`{ "code": 0, "data": { "scanned": 100, "deleted": 80, "skipped": 20, "failed": 0, "hasMore": true } }`。
+
+| 字段 | 含义 |
+|---|---|
+| `scanned` | 本次尝试读取的 Challenge 文档数量 |
+| `deleted` | 本次完成删除的过期原文档数量 |
+| `skipped` | 未过期、缺失、过期字段无效或不在允许前缀内的条目数量 |
+| `failed` | 本次读取、JSON 解析或删除失败的数量；`code: 0` 不代表该值一定为 0 |
+| `hasMore` | 是否仍有扫描进度需要继续；为 `true` 时可再次调用同一接口 |
+
+每批最多检查 100 条，仅删除 `passkey/challenges/` 下 `expiresAt` 为有限数字且已过期至少 60 秒的原文档。使用强一致列举与读取，约 10 秒后停止开始新的操作；已开始的存储操作会等待完成，因此这不是强制的 HTTP 超时。进度保存到 `system/maintenance/passkey-challenges.json`，扫描结束后归零，下次调用重新全扫。临时读取或删除失败会保留重试位置；坏 JSON 保留并跳过，下一轮全扫再次检查。
+
+回收与旧 KV 迁移共用不可抢占锁，锁忙时本次失败，稍后重试。回收不删除 `auth/consumed/` 回执、Passkey 凭证、用户数据或其它锁；相关恢复边界见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
+
+当前仅提供管理员手动调用，尚未配置定时回收。
+
 ## 环境变量一览
 
 | 变量名 | 必需 | 说明 |
@@ -484,6 +508,7 @@ OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中
 - **Passkey**：旧凭证在成功验签后转换公钥格式；不可验证时使用 Token 登录后重新绑定。平台内部请求域名与公开域名不同时，设置 `PASSKEY_ORIGIN`。
 - **OIDC**：Provider 需支持 PKCE S256。绑定改为带 Bearer 鉴权的 POST，旧的 `?mode=bind&token=...` 调用方式不再接受；后台界面已适配。
 - **进行中的登录**：旧版 challenge、OIDC Session 和未经过新版验签的管理 Token 会被拒绝，重新发起登录或绑定即可。
+- **Challenge 回收**：新增管理员分批手动回收接口；新流程不再互相替换 Challenge。混用旧版本部署时，旧版本仍可能删除旧 `currentChallengeId` 指向的流程，应一并升级。消费回执继续保留，不属于本次删除范围。
 - **导入数据**：导入是覆盖操作；完整校验后再写入，不预先删除计数文档。多个 Blob 文档之间没有事务。
 - **参数校验**：设置计数与导入统一使用非负安全整数，批量递增最多 100 项；不再接受截断后有效的混合文本。历史数据中的非法计数或白名单需修正后再导入，升级不会自动清理或迁移已有数据。
 - **遗留锁**：函数异常终止可能留下锁，当前版本不会自动抢占。恢复前必须暂停写入并确认所有在途操作已结束，按 [恢复步骤](docs/blob-concurrency.md#遗留锁恢复) 处理。
@@ -498,7 +523,7 @@ npm run build
 
 回归测试使用内存 Blob、本地生成的签名密钥和浏览器请求模拟，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、计数及白名单校验、导入失败、锁竞争、适配器请求合并与 UV 标记、登录故障处理及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
 
-Challenge 回归还覆盖并行流程、独立取消、签名计数器不回退及前端迟到 ID 清理。
+Challenge 回归还覆盖并行流程、独立取消、签名计数器不回退、前端迟到 ID 清理、回收分页断点、失败重试、鉴权及迁移互斥。
 
 计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 

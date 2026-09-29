@@ -51,6 +51,7 @@
 │       ├── _api.js             # 通用响应、CORS、鉴权工具
 │       ├── _blobStore.js       # Blob Store 工厂 + Key 命名规则 + 读写工具
 │       ├── _counterValidation.js # 计数参数与来源白名单统一校验
+│       ├── _challengeCleanup.js # 过期 Challenge 分批回收与断点
 │       ├── _oidc.js            # OIDC Discovery/JWKS、PKCE、Cookie 与 Token 校验
 │       ├── _passkey.js         # WebAuthn 验签、可信 Origin 与旧凭证公钥兼容
 │       ├── _legacyMigration.js # 旧 KV → Blob 迁移逻辑
@@ -58,6 +59,8 @@
 │       ├── counter.js          # 计数器核心（inc / batch_inc / set / delete / list / summary / export / import / set_config）
 │       ├── init.js             # 首次初始化与迁移触发
 │       ├── passkey.js          # Passkey 注册 / 登录 / 管理
+│       ├── maintenance/
+│       │   └── challenges.js   # 管理员手动清理过期 Challenge
 │       └── oidc/
 │           ├── login.js        # OIDC 登录发起（state / nonce / code_verifier 写入 Blob）
 │           ├── callback.js     # OIDC 回调换码 + ID Token 校验 + 绑定/登录
@@ -297,7 +300,7 @@
 - 响应结构统一：`{ code: 0|1000|1404, data?, message? }`；`code === 0` 为成功
 - 错误处理：`try/catch` 包裹 `await fetch`，失败把 `data.message` 写入组件的 `message` ref 提示用户；**禁止 `alert` / `confirm`**，确认框统一走 `components/common/ConfirmModal.vue`
 - 登录相关 JSON 请求使用 `src/utils/requestJson.js`：默认 15 秒，覆盖响应体读取；支持取消，校验 HTTP 及业务响应结构，不自动重试写入或一次性凭证兑换。
-- Passkey 前端流程使用 `src/utils/passkeyCeremony.js`，每个实例只生成一次 Challenge。取消、失败、卸载或 `pagehide` 仅尽力清理本次 ID；清理独立 5 秒超时，离开页面使用 `keepalive`，不能复用已取消的 signal。生成响应迟到时清理返回的 ID；无法收到 ID 时原文档可能遗留，成功验证不重复取消。
+- Passkey 前端流程使用 `src/utils/passkeyCeremony.js`，每个实例只生成一次 Challenge。取消、失败、卸载或 `pagehide` 仅尽力清理本次 ID；清理独立 5 秒超时，离开页面使用 `keepalive`，不能复用已取消的 signal。生成响应迟到时清理返回的 ID；无法收到 ID 则依赖手动回收，成功验证不重复取消。
 
 ### 6.4 类型定义（JSDoc）
 
@@ -485,6 +488,7 @@ export async function onRequest({ request, env }) {
 | Key（由 `_blobStore.js` 工厂生成） | 字段 | 生命周期 / 兼容 |
 |---|---|---|
 | `system/counters.json` | `items[target]: { target, time, created_at, updated_at }`, `updatedAt`, `version` | 维持 `2.1`；不改变计数布局 |
+| `system/maintenance/passkey-challenges.json` | `cursor: null \| { page: string, afterKey: string }`, `updatedAt` | `page` 为 SDK 原始分页游标，`afterKey` 为本页已处理的最后 Key；完成全扫后 `cursor: null` |
 | `passkey/users/<编码 id>.json` | `id`, `username`, `token`, `credentialIds`, `createdAt`, `updatedAt`；旧数据可含 `currentChallengeId` | 新流程不写 `currentChallengeId`；历史引用仅在消费/取消相同 ID 时清理，不用于限制并行流程 |
 | `passkey/credentials/<编码 id>.json` | `id`, `publicKey`, `publicKeyFormat`, `counter`, `transports`, `deviceType`, `backedUp`, `userId`, `webAuthnUserID`, `createdAt`, 可选 `lastUsedAt` | 新格式 `publicKeyFormat: "cose"`；旧格式无此标记，成功验签后转换 |
 | `passkey/challenges/<编码 id>.json` | `challenge`, `userId`, `purpose`, `origin`, `rpID`, `createdAt`, `expiresAt`；注册另含 `username`, `token`, `webAuthnUserID` | 5 分钟；每次流程独立且条件创建，`purpose` 为 `registration` / `authentication` / `management`，旧无上下文 challenge 需重发；过期不自动删除 |
@@ -495,6 +499,14 @@ export async function onRequest({ request, env }) {
 | `locks/counters-document.json`, `locks/system-state.json`, `locks/passkey/users/<编码 id>.json`, `locks/legacy-migration.json` | `requestId`, `expiresAt`, `createdAt` | 所有者正常释放；`expiresAt` 仅诊断，不授权抢占，异常遗留需维护恢复 |
 
 认证库仅用于 Cloud Functions，不导入前端。为兼容现有 Bearer 登录架构，成功的 Passkey/OIDC 登录交换可以返回实际管理 Token；状态查询和其它管理响应仍禁止泄露凭证。
+
+### 8.9 Challenge 手动回收
+
+- `POST /api/maintenance/challenges` 必须先经 `requireAuth`，不接受调用方指定 Key、前缀或截止时间；OPTIONS 和 JSON 继续使用 `_api.js`。返回 `scanned` / `deleted` / `skipped` / `failed` / `hasMore`，不返回凭证内容。
+- `_challengeCleanup.js` 只回收 `getStoragePrefixes().passkeyChallenges` 中已过期至少 60 秒的原文档；强一致分页每次最多 100 条，约 10 秒协作预算，在途操作完成后才保存进度和释放锁，禁止超时后放任写操作继续执行。
+- 维护 Key 集中在 `challengeCleanupStateKey()`；SDK 原始分页游标不能用返回 Key 替代。读取或删除临时失败保留重试位置，坏 JSON 跳过留存，下一轮全扫再检查。
+- 回收与旧 KV 迁移共用 `legacyMigrationLockKey()`，获取只尝试一次，不按 TTL 抢占。只删除过期原文档，不删除 `auth/consumed/`、凭证、用户或其它锁；消费回执按 `docs/blob-concurrency.md` 的条件单独维护。
+- 当前仅提供手动接口，不配置定时任务，也不在登录时全量扫描；没有调用接口时，物理残留不会自动回收。
 
 ---
 
@@ -577,7 +589,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
 - [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验、列表/概览共用读取、请求乱序保护；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
 - [x] **计数与登录故障处理**：统一计数/白名单校验及批量上限，适配器合并请求并在确认成功后记录 UV；登录检测区分未知与未初始化，网络失败保留 Token 并支持重试。
-- [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消及签名计数器串行更新；消费回执保留。
+- [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消、签名计数器串行更新及受鉴权的分批手动回收接口；消费回执保留。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。
