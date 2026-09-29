@@ -187,6 +187,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   ├── main.js             # 入口文件
 │   ├── style.css           # 全局样式与主题 Token
 │   ├── utils/latestRequest.js # 请求取消、超时和响应序号保护
+│   ├── utils/requestJson.js # 登录请求超时、取消与响应校验
+│   ├── utils/passkeyCeremony.js # 每次 Passkey 流程的取消与清理
 │   └── theme.js            # 主题解析与持久化
 ├── tests/                  # 认证、导入、锁与请求乱序回归测试
 ├── docs/blob-concurrency.md # Blob 并发设计与遗留锁恢复
@@ -419,6 +421,13 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 - 新凭证使用 Base64URL 编码的 COSE 公钥并标记 `publicKeyFormat: "cose"`。旧版存储的 attestationObject 会在验证 RP ID 和 Credential ID 后提取公钥，成功验签后才更新格式；无法解析的旧凭证需通过 Token 登录后重新绑定。
 - 升级前进行中的登录/绑定需重新发起；旧版未验证的临时管理凭证不再接受。实际管理员 Token 仅在成功的登录交换中返回，以兼容现有前端 Bearer 鉴权。
 
+### Passkey Challenge 生命周期与清理
+
+- 注册、登录和管理验证各自生成独立、5 分钟有效的 Challenge，以随机 ID 条件创建，不复用或续期。新流程不删除其它流程的 Challenge，也不再设置用户级 `currentChallengeId`；历史字段不参与新流程判定，仅在消费/取消同 ID 时清理匹配的旧引用。
+- 验证仍校验用途、Origin、RP ID、签名和签名计数器，并唯一消费对应 Challenge。并行流程互不删除 Challenge；同一凭证的签名计数器读改写在用户锁内执行，乱序到达的较小计数器仍可能被拒绝。重新注册仍替换该用户旧凭证，并发注册按提交顺序串行保存。
+- 前端在取消、失败、卸载或 `pagehide` 时，尽力调用 `POST /api/passkey`，Body 为 `{ "action": "cancelChallenge", "data": { "challengeId": "<本次 ID>" } }`。取消仅针对该 ID，可重复调用；ID 为 1～128 位字母、数字、下划线或连字符。取消未过期 Challenge 时仍保留一次性消费回执；已过期原文档可以直接清理。调用端必须持有本次生成响应中的 ID，不能按用户名取消其它流程。
+- 前端清理请求使用独立的 5 秒超时，离开页面使用 `keepalive`；不会阻塞下一次重试。生成选项最多等待 15 秒，以便清理取消后迟到的 ID。无法收到 ID、断网或浏览器终止时，仍可能遗留原文档。验证成功不重复取消，验签请求不自动重试。
+
 ## 环境变量一览
 
 | 变量名 | 必需 | 说明 |
@@ -464,7 +473,9 @@ OIDC 的使用顺序建议如下：
 
 OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中的临时 `state` 和一次性 Session 会写入 `oidc/states/*.json` 与 `oidc/sessions/*.json`，并通过 `expiresAt` 做应用层过期控制。
 
-> 登录页加载时会先进行环境检测（显示加载动画），检测完成后仅展示已配置/已绑定的登录方式，保持界面简洁。
+> 登录页并发检测初始化、旧 KV 与 Passkey 状态，加载占位至少显示 600ms，检测请求最多等待 5 秒；登录网络请求超时为 15 秒，并支持卸载取消。可选能力检测失败时隐藏对应入口，Token 登录仍可使用；未绑定旧 KV 属于正常未开启。初始化状态未知或检测失败时提供重试，并按 Token 登录处理；仅明确检测到未初始化时才允许初始化。
+
+已保存 Token 的校验遇到网络故障、服务器错误或无效响应时，保留本地 Token、保持未认证状态并提供重试；只有明确的认证失效响应才清除 Token。OIDC 一次性 Session 兑换不自动重试。
 
 ## 升级注意事项
 
@@ -485,7 +496,9 @@ npm test
 npm run build
 ```
 
-回归测试使用内存 Blob、本地生成的签名密钥和浏览器请求模拟，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、计数及白名单校验、导入失败、锁竞争、适配器请求合并与 UV 标记及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
+回归测试使用内存 Blob、本地生成的签名密钥和浏览器请求模拟，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、计数及白名单校验、导入失败、锁竞争、适配器请求合并与 UV 标记、登录故障处理及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
+
+Challenge 回归还覆盖并行流程、独立取消、签名计数器不回退及前端迟到 ID 清理。
 
 计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 

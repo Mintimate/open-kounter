@@ -5,6 +5,7 @@ import { verifyRegistrationResponse } from '@simplewebauthn/server'
 import {
   consumeTransientJson,
   deleteJson,
+  legacyMigrationLockKey,
   passkeyChallengeKey,
   passkeyCredentialKey,
   passkeyManagementTokenKey,
@@ -113,23 +114,6 @@ async function getCredential(store, credentialId) {
   return await readJson(store, passkeyCredentialKey(credentialId))
 }
 
-async function saveCredential(store, credential) {
-  await writeJson(store, passkeyCredentialKey(credential.id), credential)
-  await updateUser(store, credential.userId, (user) => {
-    if (!user) {
-      return null
-    }
-    const credentialIds = Array.isArray(user.credentialIds) ? user.credentialIds : []
-    if (!credentialIds.includes(credential.id)) {
-      credentialIds.push(credential.id)
-    }
-    return {
-      ...user,
-      credentialIds
-    }
-  })
-}
-
 async function getUserCredentials(store, userId) {
   const user = await getUser(store, userId)
   if (!user || !Array.isArray(user.credentialIds)) {
@@ -167,17 +151,23 @@ async function saveChallenge(store, challengeId, data) {
     ...data,
     createdAt: Date.now(),
     expiresAt: Date.now() + TRANSIENT_TTL_MS
-  })
+  }, { onlyIfNew: true })
 }
 
-async function getAndDeleteChallenge(store, challengeId) {
-  const data = await consumeTransientJson(store, passkeyChallengeKey(challengeId))
-  if (!data) return null
+function validateChallengeId(challengeId) {
+  if (typeof challengeId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(challengeId)) {
+    throw new Error('Invalid challenge ID')
+  }
+  return challengeId
+}
 
-  if (data.userId) {
-    await updateUser(store, data.userId, (user) => {
+async function clearLegacyChallengeReference(store, userId, challengeId) {
+  if (userId) {
+    const current = await getUser(store, userId)
+    if (current?.currentChallengeId !== challengeId) return
+    await updateUser(store, userId, (user) => {
       if (!user || user.currentChallengeId !== challengeId) {
-        return user
+        return null
       }
 
       const next = { ...user }
@@ -186,6 +176,12 @@ async function getAndDeleteChallenge(store, challengeId) {
     })
   }
 
+}
+
+async function getAndDeleteChallenge(store, challengeId) {
+  validateChallengeId(challengeId)
+  const data = await consumeTransientJson(store, passkeyChallengeKey(challengeId))
+  if (data) await clearLegacyChallengeReference(store, data.userId, challengeId)
   return data
 }
 
@@ -208,27 +204,6 @@ async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
   await validateTokenValue(token, store, env)
 
   const userId = await generateUserIdFromUsername(username)
-  let user = await getUser(store, userId)
-
-  if (user?.currentChallengeId) {
-    await deleteJson(store, passkeyChallengeKey(user.currentChallengeId))
-  }
-
-  if (user) {
-    user = {
-      ...user,
-      token,
-      updatedAt: Date.now()
-    }
-  } else {
-    user = {
-      id: userId,
-      username,
-      token,
-      credentialIds: [],
-      createdAt: Date.now()
-    }
-  }
 
   const challengeBytes = new Uint8Array(32)
   crypto.getRandomValues(challengeBytes)
@@ -265,8 +240,13 @@ async function handleGenerateRegistrationOptions(store, data, rpConfig, env) {
   }
 
   const challengeId = generateUUID()
-  user.currentChallengeId = challengeId
-  await saveUser(store, user)
+  // Creating one ceremony must not invalidate any other request's challenge.
+  await updateUser(store, userId, (user) => ({
+    ...(user || { id: userId, credentialIds: [], createdAt: Date.now() }),
+    username,
+    token,
+    updatedAt: Date.now()
+  }))
   await saveChallenge(store, challengeId, {
     challenge,
     userId,
@@ -315,8 +295,6 @@ async function handleVerifyRegistration(store, data, rpConfig, env) {
     })
     if (!verification.verified) throw new Error('Registration verification failed')
     const info = verification.registrationInfo
-    const existing = await getCredential(store, info.credential.id)
-    if (existing && existing.userId !== challengeData.userId) throw new Error('Credential already registered')
     const newCredential = {
       id: info.credential.id,
       publicKey: base64URLEncode(info.credential.publicKey),
@@ -330,24 +308,21 @@ async function handleVerifyRegistration(store, data, rpConfig, env) {
       createdAt: Date.now()
     }
 
-    await saveCredential(store, newCredential)
-
-    const allCredentials = await getUserCredentials(store, challengeData.userId)
-    for (const credential of allCredentials) {
-      if (credential.id !== newCredential.id) {
-        await deleteCredential(store, credential.id)
-      }
-    }
-
-    await updateUser(store, challengeData.userId, (user) => {
-      if (!user) {
-        return null
-      }
-
-      return {
+    // Preserve replacement semantics while serializing concurrent registrations.
+    await withBlobLock(store, passkeyUserLockKey(challengeData.userId), async () => {
+      const user = await getUser(store, challengeData.userId)
+      if (!user) throw new Error('User not found')
+      const existing = await getCredential(store, newCredential.id)
+      if (existing && existing.userId !== challengeData.userId) throw new Error('Credential already registered')
+      await writeJson(store, passkeyCredentialKey(newCredential.id), newCredential)
+      await saveUser(store, {
         ...user,
+        credentialIds: [newCredential.id],
         token: challengeData.token,
         updatedAt: Date.now()
+      })
+      for (const credentialId of user.credentialIds || []) {
+        if (credentialId !== newCredential.id) await deleteJson(store, passkeyCredentialKey(credentialId))
       }
     })
 
@@ -373,11 +348,6 @@ async function handleGenerateAuthenticationOptions(store, data, rpConfig) {
 
   if (username) {
     userId = await generateUserIdFromUsername(username)
-    const user = await getUser(store, userId)
-    if (user?.currentChallengeId) {
-      await deleteJson(store, passkeyChallengeKey(user.currentChallengeId))
-    }
-
     const credentials = await getUserCredentials(store, userId)
     if (credentials.length === 0) {
       return { code: RES_CODE.NOT_FOUND, message: 'No passkey found for this user' }
@@ -403,19 +373,6 @@ async function handleGenerateAuthenticationOptions(store, data, rpConfig) {
   }
 
   const challengeId = generateUUID()
-  if (userId) {
-    await updateUser(store, userId, (user) => {
-      if (!user) {
-        return null
-      }
-
-      return {
-        ...user,
-        currentChallengeId: challengeId
-      }
-    })
-  }
-
   await saveChallenge(store, challengeId, {
     challenge,
     userId,
@@ -438,25 +395,30 @@ async function verifyAuthentication(store, data, rpConfig, purpose) {
   if (!challengeId || !response?.id) throw new Error('Missing required parameters')
   const challenge = await getAndDeleteChallenge(store, challengeId)
   if (!challenge || challenge.purpose !== purpose) throw new Error('Challenge expired or invalid')
-  const credential = await getCredential(store, response.id)
-  if (!credential || (challenge.userId && credential.userId !== challenge.userId)) {
+  const initialCredential = await getCredential(store, response.id)
+  if (!initialCredential || (challenge.userId && initialCredential.userId !== challenge.userId)) {
     throw new Error('Credential not allowed')
   }
-  const user = await getUser(store, credential.userId)
-  if (!user?.credentialIds?.includes(credential.id)) throw new Error('Credential not registered')
-  const handle = response.response?.userHandle
-  if (handle && handle !== (credential.webAuthnUserID || user.id)) throw new Error('User handle mismatch')
-  const verified = await verifyPasskeyAssertion(response, credential, challenge, rpConfig)
-  await writeJson(store, passkeyCredentialKey(credential.id), {
-    ...credential,
-    publicKey: base64URLEncode(verified.publicKey),
-    publicKeyFormat: 'cose',
-    counter: verified.newCounter,
-    deviceType: verified.credentialDeviceType,
-    backedUp: verified.credentialBackedUp,
-    lastUsedAt: Date.now()
+  // Challenge IDs are independent; credential counters must still advance safely.
+  return withBlobLock(store, passkeyUserLockKey(initialCredential.userId), async () => {
+    const credential = await getCredential(store, response.id)
+    if (!credential || credential.userId !== initialCredential.userId) throw new Error('Credential not allowed')
+    const user = await getUser(store, credential.userId)
+    if (!user?.credentialIds?.includes(credential.id)) throw new Error('Credential not registered')
+    const handle = response.response?.userHandle
+    if (handle && handle !== (credential.webAuthnUserID || user.id)) throw new Error('User handle mismatch')
+    const verified = await verifyPasskeyAssertion(response, credential, challenge, rpConfig)
+    await writeJson(store, passkeyCredentialKey(credential.id), {
+      ...credential,
+      publicKey: base64URLEncode(verified.publicKey),
+      publicKeyFormat: 'cose',
+      counter: verified.newCounter,
+      deviceType: verified.credentialDeviceType,
+      backedUp: verified.credentialBackedUp,
+      lastUsedAt: Date.now()
+    })
+    return user
   })
-  return user
 }
 
 async function handleVerifyAuthentication(store, data, rpConfig, env) {
@@ -529,7 +491,19 @@ async function handleDeleteCredential(store, data) {
 
 async function handleCancelChallenge(store, data) {
   if (data?.challengeId) {
-    await getAndDeleteChallenge(store, data.challengeId)
+    const challengeId = validateChallengeId(data.challengeId)
+    // Legacy imports can reuse an ID; cancellation and maintenance share their lock.
+    await withBlobLock(store, legacyMigrationLockKey(), async () => {
+      const key = passkeyChallengeKey(challengeId)
+      const challenge = await readJson(store, key)
+      if (!challenge) return
+      if (!Number.isFinite(challenge.expiresAt)) throw new Error('Invalid challenge expiry')
+      const consumed = challenge.expiresAt > Date.now() && await getAndDeleteChallenge(store, challengeId)
+      if (!consumed) {
+        await deleteJson(store, key)
+        await clearLegacyChallengeReference(store, challenge.userId, challengeId)
+      }
+    })
   }
   return {
     code: RES_CODE.SUCCESS,

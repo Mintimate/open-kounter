@@ -1,6 +1,10 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+
 import ConfirmModal from '../common/ConfirmModal.vue'
+
+import { createPasskeyCeremony } from '../../utils/passkeyCeremony.js'
+import { requestJson } from '../../utils/requestJson.js'
 
 const props = defineProps(['token'])
 
@@ -13,6 +17,8 @@ const newToken = ref('')
 const oldToken = ref('')
 const authMethod = ref('passkey') // 'passkey' | 'token'
 const hasAdminToken = ref(false)
+const lifecycleController = new AbortController()
+let reloadTimer = null
 
 // Modal states
 const showSyncModal = ref(false)
@@ -21,32 +27,34 @@ const showUpdateModal = ref(false)
 // Check if ADMIN_TOKEN is configured on the server
 const checkStatus = async () => {
   try {
-    const res = await fetch('/api/auth', {
+    const data = await requestJson('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: lifecycleController.signal,
       body: JSON.stringify({ action: 'get_status' })
     })
-    const data = await res.json()
+    if (lifecycleController.signal.aborted) return
     if (data.code === 0) {
       hasAdminToken.value = !!data.data.hasAdminToken
     }
   } catch (e) {
-    console.error('Check status error:', e)
+    if (!lifecycleController.signal.aborted) message.value = `状态检测失败: ${e.message}`
   }
 }
 
 // 检查是否已有 Passkey
 const checkPasskey = async () => {
   try {
-    const res = await fetch('/api/passkey', {
+    const data = await requestJson('/api/passkey', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: lifecycleController.signal,
       body: JSON.stringify({
         action: 'listCredentials',
         data: { username: username.value }
       })
     })
-    const data = await res.json()
+    if (lifecycleController.signal.aborted) return
     if (data.code === 0 && data.data.length > 0) {
       hasPasskey.value = true
       credentials.value = data.data
@@ -57,7 +65,7 @@ const checkPasskey = async () => {
       authMethod.value = 'token'
     }
   } catch (e) {
-    console.error('Check passkey error:', e)
+    if (!lifecycleController.signal.aborted) message.value = `Passkey 检测失败: ${e.message}`
   }
 }
 
@@ -66,34 +74,29 @@ onMounted(() => {
   checkStatus()
 })
 
+onBeforeUnmount(() => {
+  lifecycleController.abort()
+  clearTimeout(reloadTimer)
+})
+
 // 绑定/重新绑定 Passkey
 const handleBindPasskey = async () => {
+  if (loading.value || lifecycleController.signal.aborted) return
   loading.value = true
   message.value = ''
+  const ceremony = createPasskeyCeremony({ signal: lifecycleController.signal })
   
   try {
     // 1. 生成注册选项
-    const optionsRes = await fetch('/api/passkey', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'generateRegistrationOptions',
-        data: {
-          username: username.value,
-          token: props.token
-        }
-      })
+    const { options, challengeId } = await ceremony.generate('generateRegistrationOptions', {
+      username: username.value,
+      token: props.token
     })
-    const optionsData = await optionsRes.json()
-    
-    if (optionsData.code !== 0) {
-      throw new Error(optionsData.message)
-    }
-    
-    const { options, challengeId } = optionsData.data
+    if (!ceremony.active) return
     
     // 2. 调用 WebAuthn API
-    const credential = await navigator.credentials.create({
+    const credential = await ceremony.wait(navigator.credentials.create({
+      signal: ceremony.signal,
       publicKey: {
         ...options,
         challenge: base64URLDecode(options.challenge),
@@ -102,12 +105,14 @@ const handleBindPasskey = async () => {
           id: base64URLDecode(options.user.id)
         }
       }
-    })
+    }))
+    if (!ceremony.active) return
     
     // 3. 验证注册
-    const verifyRes = await fetch('/api/passkey', {
+    const verifyData = await requestJson('/api/passkey', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: ceremony.signal,
       body: JSON.stringify({
         action: 'verifyRegistration',
         data: {
@@ -126,19 +131,20 @@ const handleBindPasskey = async () => {
       })
     })
     
-    const verifyData = await verifyRes.json()
+    if (!ceremony.active) return
     
     if (verifyData.code === 0) {
+      ceremony.complete()
       message.value = hasPasskey.value ? 'Passkey 重新绑定成功！' : 'Passkey 绑定成功！'
       await checkPasskey()
     } else {
       throw new Error(verifyData.message)
     }
   } catch (e) {
-    console.error('Bind passkey error:', e)
-    message.value = `绑定失败: ${e.message}`
+    if (ceremony.active && !lifecycleController.signal.aborted) message.value = `绑定失败: ${e.message}`
   } finally {
-    loading.value = false
+    ceremony.cancel()
+    if (!lifecycleController.signal.aborted) loading.value = false
   }
 }
 
@@ -148,33 +154,34 @@ const openSyncModal = () => {
 }
 
 const executeSyncAdminToken = async () => {
+  if (loading.value || lifecycleController.signal.aborted) return
   loading.value = true
   message.value = ''
 
   try {
-    const res = await fetch('/api/auth', {
+    const data = await requestJson('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: lifecycleController.signal,
       body: JSON.stringify({
         action: 'syncAdminToken',
         token: props.token
       })
     })
-    const data = await res.json()
+    if (lifecycleController.signal.aborted) return
     if (data.code === 0) {
       showSyncModal.value = false
       message.value = 'ADMIN_TOKEN 已覆盖写入 Blob！即将重新加载...'
-      setTimeout(() => {
+      reloadTimer = setTimeout(() => {
         window.location.reload()
       }, 1500)
     } else {
       throw new Error(data.message)
     }
   } catch (e) {
-    console.error('Sync admin token error:', e)
-    message.value = `同步失败: ${e.message}`
+    if (!lifecycleController.signal.aborted) message.value = `同步失败: ${e.message}`
   } finally {
-    loading.value = false
+    if (!lifecycleController.signal.aborted) loading.value = false
   }
 }
 
@@ -196,32 +203,28 @@ const openUpdateModal = () => {
 }
 
 const executeUpdateToken = async () => {
+  if (loading.value || lifecycleController.signal.aborted) return
   loading.value = true
   message.value = ''
+  const method = authMethod.value
+  const requestedToken = newToken.value
+  const currentToken = oldToken.value
+  const ceremony = method === 'passkey' ? createPasskeyCeremony({ signal: lifecycleController.signal }) : null
 
   try {
     let managementToken = null
 
-    if (authMethod.value === 'passkey') {
+    if (ceremony) {
       // 1. 获取认证选项
-      const optionsRes = await fetch('/api/passkey', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'generateAuthenticationOptions',
-          data: { username: username.value, purpose: 'management' }
-        })
+      const { options, challengeId } = await ceremony.generate('generateAuthenticationOptions', {
+        username: username.value,
+        purpose: 'management'
       })
-      const optionsData = await optionsRes.json()
-
-      if (optionsData.code !== 0) {
-        throw new Error(optionsData.message)
-      }
-
-      const { options, challengeId } = optionsData.data
+      if (!ceremony.active) return
 
       // 2. 调用 WebAuthn API
-      const credential = await navigator.credentials.get({
+      const credential = await ceremony.wait(navigator.credentials.get({
+        signal: ceremony.signal,
         publicKey: {
           ...options,
           challenge: base64URLDecode(options.challenge),
@@ -230,12 +233,14 @@ const executeUpdateToken = async () => {
             id: base64URLDecode(c.id)
           }))
         }
-      })
+      }))
+      if (!ceremony.active) return
 
       // 3. 获取 Management Token
-      const tokenRes = await fetch('/api/passkey', {
+      const tokenData = await requestJson('/api/passkey', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: ceremony.signal,
         body: JSON.stringify({
           action: 'generateManagementToken',
           data: {
@@ -255,51 +260,58 @@ const executeUpdateToken = async () => {
         })
       })
 
-      const tokenData = await tokenRes.json()
+      if (!ceremony.active) return
 
       if (tokenData.code !== 0) {
         throw new Error(tokenData.message)
       }
+      if (typeof tokenData.data?.managementToken !== 'string' || !tokenData.data.managementToken) {
+        throw new Error('Passkey 响应格式异常')
+      }
 
+      ceremony.complete()
       managementToken = tokenData.data.managementToken
     }
 
     // 4. 更新 Token
     const updateBody = {
-      newToken: newToken.value
+      newToken: requestedToken
     }
 
-    if (authMethod.value === 'passkey') {
+    if (method === 'passkey') {
       updateBody.managementToken = managementToken
     } else {
-      updateBody.token = oldToken.value
+      updateBody.token = currentToken
     }
 
-    const updateRes = await fetch('/api/auth', {
+    const updateData = await requestJson('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: lifecycleController.signal,
       body: JSON.stringify(updateBody)
     })
 
-    const updateData = await updateRes.json()
+    if (lifecycleController.signal.aborted) return
 
     if (updateData.code === 0) {
       showUpdateModal.value = false
       message.value = 'Token 更新成功！即将重新加载...'
       newToken.value = ''
       oldToken.value = ''
-      setTimeout(() => {
+      reloadTimer = setTimeout(() => {
         window.location.reload()
       }, 1500)
     } else {
       throw new Error(updateData.message)
     }
   } catch (e) {
-    console.error('Update token error:', e)
-    message.value = `更新失败: ${e.message}`
-    showUpdateModal.value = false
+    if (!lifecycleController.signal.aborted && (!ceremony || ceremony.active)) {
+      message.value = `更新失败: ${e.message}`
+      showUpdateModal.value = false
+    }
   } finally {
-    loading.value = false
+    ceremony?.cancel()
+    if (!lifecycleController.signal.aborted) loading.value = false
   }
 }
 

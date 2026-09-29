@@ -1,10 +1,14 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+
+import { createPasskeyCeremony } from '../utils/passkeyCeremony.js'
+import { requestJson } from '../utils/requestJson.js'
 
 const emit = defineEmits(['login'])
 
 const tokenInput = ref('')
-const isInitialized = ref(true)
+// Only a successful status response can authorize initialization.
+const isInitialized = ref(null)
 const loading = ref(false)
 const message = ref('')
 const username = ref('admin')
@@ -13,111 +17,100 @@ const migrationLoading = ref(false)
 const oidcLoginEnabled = ref(false)
 const passkeyLoginEnabled = ref(false)
 const checkingStatus = ref(true)
+const statusMessage = ref('')
+const lifecycleController = new AbortController()
+let statusController = null
 
-const checkInitStatus = async () => {
-  try {
-    const res = await fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'get_status' })
-    })
-    const data = await res.json()
-    if (data.code === 0) {
-      isInitialized.value = !!data.data.initialized
-      oidcLoginEnabled.value = !!data.data.oidcLoginEnabled
-    } else {
-      isInitialized.value = false
-    }
-  } catch (e) {
-    console.error(e)
-    isInitialized.value = false
-  }
-}
-
-const checkLegacyStatus = async () => {
-  try {
-    const res = await fetch('/legacy-api/migrate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'status' })
-    })
-    const data = await res.json()
-    hasLegacyData.value = data.code === 0 && !!data.data?.initialized
-  } catch (e) {
-    console.error('Legacy status check error:', e)
-    hasLegacyData.value = false
-  }
-}
-
-const checkPasskeyStatus = async () => {
-  try {
-    const res = await fetch('/api/passkey', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'listCredentials', data: { username: 'admin' } })
-    })
-    const data = await res.json()
-    if (data.code === 0 && data.data && data.data.length > 0) {
-      passkeyLoginEnabled.value = true
-    }
-  } catch (e) {
-    console.error('Passkey status check error:', e)
-  }
-}
-
-onMounted(async () => {
+const checkLoginStatus = async () => {
+  if (loading.value || migrationLoading.value || lifecycleController.signal.aborted) return
+  statusController?.abort()
+  const controller = new AbortController()
+  statusController = controller
   checkingStatus.value = true
-  const startTime = Date.now()
-  await Promise.all([
-    checkInitStatus(),
-    checkLegacyStatus(),
-    checkPasskeyStatus()
+  isInitialized.value = null
+  oidcLoginEnabled.value = false
+  passkeyLoginEnabled.value = false
+  hasLegacyData.value = false
+  statusMessage.value = ''
+
+  const postStatus = (url, body) => requestJson(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: controller.signal,
+    timeoutMs: 5000
+  })
+  const minimumDelay = new Promise(resolve => {
+    const finish = () => {
+      clearTimeout(timer)
+      controller.signal.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, 600)
+    controller.signal.addEventListener('abort', finish, { once: true })
+  })
+  const [results] = await Promise.all([
+    Promise.allSettled([
+      postStatus('/api/auth', { action: 'get_status' }),
+      postStatus('/legacy-api/migrate', { action: 'status' }),
+      postStatus('/api/passkey', { action: 'listCredentials', data: { username: 'admin' } })
+    ]),
+    minimumDelay
   ])
-  const elapsed = Date.now() - startTime
-  if (elapsed < 600) {
-    await new Promise(resolve => setTimeout(resolve, 600 - elapsed))
+  if (controller.signal.aborted || lifecycleController.signal.aborted || controller !== statusController) return
+
+  const [auth, legacy, passkey] = results.map(result => result.status === 'fulfilled' ? result.value : null)
+  const authKnown = auth?.code === 0 && typeof auth.data?.initialized === 'boolean'
+  const legacyKnown = (legacy?.code === 0 && typeof legacy.data?.initialized === 'boolean')
+    || (legacy?.code === 1000 && legacy.message === 'OPEN_KOUNTER not bound')
+  const passkeyKnown = passkey?.code === 0 && Array.isArray(passkey.data)
+  if (authKnown) {
+    isInitialized.value = auth.data.initialized
+    oidcLoginEnabled.value = auth.data.oidcLoginEnabled === true
+  }
+  hasLegacyData.value = legacyKnown && legacy.data?.initialized === true
+  passkeyLoginEnabled.value = passkeyKnown && passkey.data.length > 0
+  if (!authKnown) {
+    statusMessage.value = '暂时无法确认系统状态，请重试检测；已有 Token 可直接登录。'
+  } else if (!legacyKnown || !passkeyKnown) {
+    statusMessage.value = '部分登录方式检测失败，可重试检测或使用 Token 登录。'
   }
   checkingStatus.value = false
+}
+
+onMounted(checkLoginStatus)
+
+onBeforeUnmount(() => {
+  lifecycleController.abort()
+  statusController?.abort()
 })
 
 const handleSubmit = async () => {
-  if (!tokenInput.value) return
+  if (!tokenInput.value || loading.value || migrationLoading.value || checkingStatus.value || lifecycleController.signal.aborted) return
   loading.value = true
   message.value = ''
+  const submittedToken = tokenInput.value
+  const initialize = isInitialized.value === false
 
   try {
-    if (!isInitialized.value) {
-      // Initialize
-      const res = await fetch('/api/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: tokenInput.value })
-      })
-      const data = await res.json()
-      if (data.code === 0) {
-        message.value = '初始化成功！正在登录...'
-        emit('login', tokenInput.value)
-      } else {
-        message.value = data.message
-      }
+    const data = await requestJson(initialize ? '/api/init' : '/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: submittedToken }),
+      signal: lifecycleController.signal
+    })
+    if (lifecycleController.signal.aborted) return
+    if (data.code === 0) {
+      if (!initialize && data.data?.authorized !== true) throw new Error('服务响应格式异常，请重试')
+      if (initialize) message.value = '初始化成功！正在登录...'
+      emit('login', submittedToken)
     } else {
-      // Login
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: tokenInput.value })
-      })
-      const data = await res.json()
-      if (data.code === 0) {
-        emit('login', tokenInput.value)
-      } else {
-        message.value = data.message
-      }
+      message.value = data.message || '登录失败，请重试'
     }
   } catch (e) {
-    message.value = e.message
+    if (!lifecycleController.signal.aborted) message.value = e.message
   } finally {
-    loading.value = false
+    if (!lifecycleController.signal.aborted) loading.value = false
   }
 }
 
@@ -128,29 +121,21 @@ const handleOidcLogin = () => {
 
 // Passkey 登录
 const handlePasskeyLogin = async () => {
+  if (loading.value || migrationLoading.value || lifecycleController.signal.aborted) return
   loading.value = true
   message.value = ''
+  const ceremony = createPasskeyCeremony({ signal: lifecycleController.signal })
 
   try {
     // 1. 生成认证选项
-    const optionsRes = await fetch('/api/passkey', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'generateAuthenticationOptions',
-        data: { username: username.value }
-      })
+    const { options, challengeId } = await ceremony.generate('generateAuthenticationOptions', {
+      username: username.value
     })
-    const optionsData = await optionsRes.json()
-    
-    if (optionsData.code !== 0) {
-      throw new Error(optionsData.message)
-    }
-    
-    const { options, challengeId } = optionsData.data
+    if (!ceremony.active) return
     
     // 2. 调用 WebAuthn API
-    const credential = await navigator.credentials.get({
+    const credential = await ceremony.wait(navigator.credentials.get({
+      signal: ceremony.signal,
       publicKey: {
         ...options,
         challenge: base64URLDecode(options.challenge),
@@ -159,12 +144,14 @@ const handlePasskeyLogin = async () => {
           id: base64URLDecode(cred.id)
         }))
       }
-    })
+    }))
+    if (!ceremony.active) return
     
     // 3. 验证认证
-    const verifyRes = await fetch('/api/passkey', {
+    const verifyData = await requestJson('/api/passkey', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: ceremony.signal,
       body: JSON.stringify({
         action: 'verifyAuthentication',
         data: {
@@ -184,23 +171,26 @@ const handlePasskeyLogin = async () => {
       })
     })
     
-    const verifyData = await verifyRes.json()
+    if (!ceremony.active) return
     
     if (verifyData.code === 0) {
+      if (typeof verifyData.data?.token !== 'string' || !verifyData.data.token) throw new Error('Passkey 响应格式异常')
+      ceremony.complete()
       message.value = 'Passkey 登录成功！'
       emit('login', verifyData.data.token)
     } else {
       throw new Error(verifyData.message)
     }
   } catch (e) {
-    console.error('Passkey login error:', e)
-    message.value = `Passkey 登录失败: ${e.message}`
+    if (ceremony.active && !lifecycleController.signal.aborted) message.value = `Passkey 登录失败: ${e.message}`
   } finally {
-    loading.value = false
+    ceremony.cancel()
+    if (!lifecycleController.signal.aborted) loading.value = false
   }
 }
 
 const handleLegacyMigration = async () => {
+  if (isInitialized.value !== false || !hasLegacyData.value || loading.value || migrationLoading.value || lifecycleController.signal.aborted) return
   if (!tokenInput.value) {
     message.value = '请输入旧 KV Token 或 ADMIN_TOKEN'
     return
@@ -208,44 +198,46 @@ const handleLegacyMigration = async () => {
 
   migrationLoading.value = true
   message.value = ''
+  const submittedToken = tokenInput.value
 
   try {
-    const legacyRes = await fetch('/legacy-api/migrate', {
+    const legacyData = await requestJson('/legacy-api/migrate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: lifecycleController.signal,
       body: JSON.stringify({
         action: 'export_all',
-        token: tokenInput.value
+        token: submittedToken
       })
     })
-    const legacyData = await legacyRes.json()
+    if (lifecycleController.signal.aborted) return
 
     if (legacyData.code !== 0) {
       throw new Error(legacyData.message || '旧 KV 导出失败')
     }
 
-    const res = await fetch('/api/init', {
+    const data = await requestJson('/api/init', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: lifecycleController.signal,
       body: JSON.stringify({
         action: 'migrate_from_legacy',
-        token: tokenInput.value,
+        token: submittedToken,
         legacyBundle: legacyData.data
       })
     })
-    const data = await res.json()
+    if (lifecycleController.signal.aborted) return
 
     if (data.code === 0) {
       message.value = `迁移成功！已迁入 ${data.data.importedCounters} 个计数器，正在登录...`
-      emit('login', tokenInput.value)
+      emit('login', submittedToken)
     } else {
       message.value = data.message
     }
   } catch (e) {
-    console.error('Legacy migration error:', e)
-    message.value = e.message
+    if (!lifecycleController.signal.aborted) message.value = e.message
   } finally {
-    migrationLoading.value = false
+    if (!lifecycleController.signal.aborted) migrationLoading.value = false
   }
 }
 
@@ -292,7 +284,7 @@ function base64URLDecode(base64url) {
         Open Kounter
       </h1>
       <p class="text-gray-400 mb-8">
-        强一致 Blob 计数，简单可视化 <span class="mx-2 text-gray-600">|</span> {{ isInitialized ? '欢迎回来' : '系统初始化' }}
+        强一致 Blob 计数，简单可视化 <span class="mx-2 text-gray-600">|</span> {{ isInitialized === false ? '系统初始化' : '欢迎回来' }}
       </p>
     </div>
 
@@ -312,6 +304,10 @@ function base64URLDecode(base64url) {
       </div>
 
       <div v-else class="relative space-y-6 animate-fade-in">
+        <div v-if="statusMessage" role="status" class="space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-400">
+          <p>{{ statusMessage }}</p>
+          <button class="button-secondary button-compact" :disabled="loading || migrationLoading" @click="checkLoginStatus">重试检测</button>
+        </div>
         <div class="space-y-2">
           <label class="text-sm font-medium text-gray-300 ml-1">管理员 Token</label>
           <div class="relative">
@@ -339,14 +335,14 @@ function base64URLDecode(base64url) {
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          <span>{{ loading ? '验证中...' : (isInitialized ? '立即登录' : '设置并登录') }}</span>
+          <span>{{ loading ? '验证中...' : (isInitialized === false ? '设置并登录' : '立即登录') }}</span>
           <svg v-if="!loading" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
           </svg>
         </button>
 
         <button
-          v-if="!isInitialized && hasLegacyData"
+          v-if="isInitialized === false && hasLegacyData"
           @click="handleLegacyMigration"
           :disabled="loading || migrationLoading"
           class="w-full py-3.5 bg-dark-700/50 hover:bg-dark-700 border border-emerald-500/30 hover:border-emerald-400 text-white font-medium rounded-xl shadow-lg hover:shadow-emerald-500/20 transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none flex items-center justify-center gap-2"
@@ -361,7 +357,7 @@ function base64URLDecode(base64url) {
           <span>{{ migrationLoading ? '迁移中...' : '从旧 KV 迁移到 Blob' }}</span>
         </button>
 
-        <p v-if="!isInitialized && hasLegacyData" class="text-xs text-emerald-300/80 text-center leading-relaxed">
+        <p v-if="isInitialized === false && hasLegacyData" class="text-xs text-emerald-300/80 text-center leading-relaxed">
           检测到旧 KV 数据，可直接使用现有 Token 迁移到 Blob 并完成初始化。
         </p>
 

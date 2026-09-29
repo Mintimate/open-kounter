@@ -88,8 +88,10 @@
 │   ├── main.js                 # 入口
 │   ├── style.css               # ⭐ 唯一全局 CSS（@theme + 主题映射 + 基础样式）
 │   ├── utils/latestRequest.js # 请求取消、超时和响应序号保护
+│   ├── utils/requestJson.js  # 登录请求超时、取消与响应校验
+│   ├── utils/passkeyCeremony.js # 独立 Passkey 流程及取消清理
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
-├── tests/                      # Node 内置测试：认证、存储、适配器与请求乱序
+├── tests/                      # Node 内置测试：认证、存储、适配器、登录与请求乱序
 ├── docs/blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
@@ -285,6 +287,7 @@
 - **不引入 Pinia**
 - 仪表盘由 `CounterList` 的 `list + includeSummary: true` 请求向 `Dashboard` 上报概览与加载状态；`AnalyticsOverview` 仅消费 props 并发出刷新事件，不额外请求数据。
 - 列表读取通过 `src/utils/latestRequest.js` 取消旧请求、校验序号并执行 15 秒超时；卸载组件必须取消请求。
+- 已保存 Token 的校验遇到网络、HTTP 服务错误或无效响应时必须保留本地 Token，保持未认证状态并提供重试；仅明确认证失效时清除 Token，禁止把网络失败视为退出登录。
 
 ### 6.3 API 调用约定
 
@@ -293,6 +296,8 @@
 - 鉴权接口必须带 `Authorization: Bearer ${token}`
 - 响应结构统一：`{ code: 0|1000|1404, data?, message? }`；`code === 0` 为成功
 - 错误处理：`try/catch` 包裹 `await fetch`，失败把 `data.message` 写入组件的 `message` ref 提示用户；**禁止 `alert` / `confirm`**，确认框统一走 `components/common/ConfirmModal.vue`
+- 登录相关 JSON 请求使用 `src/utils/requestJson.js`：默认 15 秒，覆盖响应体读取；支持取消，校验 HTTP 及业务响应结构，不自动重试写入或一次性凭证兑换。
+- Passkey 前端流程使用 `src/utils/passkeyCeremony.js`，每个实例只生成一次 Challenge。取消、失败、卸载或 `pagehide` 仅尽力清理本次 ID；清理独立 5 秒超时，离开页面使用 `keepalive`，不能复用已取消的 signal。生成响应迟到时清理返回的 ID；无法收到 ID 时原文档可能遗留，成功验证不重复取消。
 
 ### 6.4 类型定义（JSDoc）
 
@@ -361,6 +366,8 @@ import ConfirmModal from './common/ConfirmModal.vue'
 UI 规则：
 
 - 检测中显示加载占位（最少展示 600ms，避免闪烁）
+- 三项检测最多等待 5 秒，必须支持卸载取消与旧响应保护；可选检测失败后隐藏对应能力，不永久阻塞 Token 表单。旧 KV 的 `OPEN_KOUNTER not bound` 属于正常未开启。检测重试仍并发执行并保留至少 600ms 占位。
+- 初始化状态区分 `true` / `false` / 未知；检测错误不等于未初始化。未知时显示重试入口，Token 提交走 `/api/auth`；仅状态明确为 `false` 时可调用 `/api/init`。
 - 仅当**对应能力确认开启 / 已绑定**时才在登录页展示对应入口（OIDC 按钮 / Passkey 按钮 / 旧 KV 迁移入口）
 - Token 登录始终可用；OIDC / Passkey 为可选渐进增强
 
@@ -469,14 +476,18 @@ export async function onRequest({ request, env }) {
 - 可信 Origin 仅来自 `PASSKEY_ORIGIN` 或服务端请求 URL；不从客户端 `Origin` / `Referer` 头建立信任。内部转发域名不同必须配置 `PASSKEY_ORIGIN`。
 - 旧 `publicKey` 的 attestationObject 仅在 RP ID / Credential ID 匹配且认证签名有效后转换为 COSE 格式。无法验证时拒绝并提示 Token 登录重绑，不批量删除旧凭证。
 - Challenge、OIDC state/session、管理 Token 必须通过 `consumeTransientJson` 的条件创建消费回执唯一消费；旧版管理 Token 缺少 `verificationVersion: 1` 时拒绝。
+- 每个 Passkey 流程条件创建独立随机 Challenge ID，不复用、不续期；不能通过用户名删除另一个流程的 Challenge。新流程不设置 `currentChallengeId`；仅消费或取消相同 ID 时，在用户锁内清理匹配的历史引用。
+- 同一凭证的读取、验签及签名计数器写回必须在用户锁内完成，不能因并发写入使计数器回退；严格计数器仍拒绝乱序旧断言。重新注册保持替换旧凭证的语义，提交串行执行。
+- `cancelChallenge` 只接受本次生成响应中的 ID（1～128 位字母、数字、下划线、连字符），按 ID 唯一消费；对已过期原文档直接删除。取消与旧迁移共用 `legacyMigrationLockKey`，不删除消费回执。
 
 ### 8.8 本轮涉及的 Blob Key / 字段
 
 | Key（由 `_blobStore.js` 工厂生成） | 字段 | 生命周期 / 兼容 |
 |---|---|---|
 | `system/counters.json` | `items[target]: { target, time, created_at, updated_at }`, `updatedAt`, `version` | 维持 `2.1`；不改变计数布局 |
+| `passkey/users/<编码 id>.json` | `id`, `username`, `token`, `credentialIds`, `createdAt`, `updatedAt`；旧数据可含 `currentChallengeId` | 新流程不写 `currentChallengeId`；历史引用仅在消费/取消相同 ID 时清理，不用于限制并行流程 |
 | `passkey/credentials/<编码 id>.json` | `id`, `publicKey`, `publicKeyFormat`, `counter`, `transports`, `deviceType`, `backedUp`, `userId`, `webAuthnUserID`, `createdAt`, 可选 `lastUsedAt` | 新格式 `publicKeyFormat: "cose"`；旧格式无此标记，成功验签后转换 |
-| `passkey/challenges/<编码 id>.json` | `challenge`, `userId`, `purpose`, `origin`, `rpID`, `createdAt`, `expiresAt`；注册另含 `username`, `token`, `webAuthnUserID` | 5 分钟；`purpose` 为 `registration` / `authentication` / `management`，旧无上下文 challenge 需重发 |
+| `passkey/challenges/<编码 id>.json` | `challenge`, `userId`, `purpose`, `origin`, `rpID`, `createdAt`, `expiresAt`；注册另含 `username`, `token`, `webAuthnUserID` | 5 分钟；每次流程独立且条件创建，`purpose` 为 `registration` / `authentication` / `management`，旧无上下文 challenge 需重发；过期不自动删除 |
 | `passkey/management-tokens/<编码 id>.json` | `userId`, `verificationVersion: 1`, `createdAt`, `expiresAt` | 5 分钟、唯一消费；拒绝旧版未验证凭证 |
 | `oidc/states/<编码 id>.json` | `state`, `nonce`, `mode`, `tokenHash`, `codeVerifier`, `issuer`, `clientId`, `redirectUri`, `browserHash`, `createdAt`, `expiresAt` | 5 分钟、唯一消费；`tokenHash` 仅绑定模式使用 |
 | `oidc/sessions/<编码 id>.json` | `sessionId`, `sub`, `issuer`, `boundAt`, `tokenHash`, `createdAt`, `expiresAt` | 60 秒、唯一消费；不保存实际管理员 Token |
@@ -565,7 +576,8 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 2**：OIDC 单点登录 + 登录页渐进式检测
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
 - [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验、列表/概览共用读取、请求乱序保护；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
-- [x] **计数与访客统计修复**：统一计数/白名单校验及批量上限；适配器合并请求并在确认成功后记录 UV。
+- [x] **计数与登录故障处理**：统一计数/白名单校验及批量上限，适配器合并请求并在确认成功后记录 UV；登录检测区分未知与未初始化，网络失败保留 Token 并支持重试。
+- [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消及签名计数器串行更新；消费回执保留。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。

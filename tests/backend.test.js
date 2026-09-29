@@ -549,3 +549,124 @@ test('invalid legacy domains do not block valid entries or silently allow unmatc
   }
   assert.equal(writes.includes(blob.SYSTEM_STATE_KEY), false)
 })
+
+test('parallel Passkey login challenges stay independent and are consumed only once', async () => {
+  const f = fixture(); seedCredential(f)
+  const options = await Promise.all([authenticationOptions(), authenticationOptions()])
+  assert.notEqual(options[0].challengeId, options[1].challengeId)
+  for (const option of options) assert.ok(records.has(blob.passkeyChallengeKey(option.challengeId)))
+  assert.equal(records.get(blob.passkeyUserKey(f.userId)).currentChallengeId, undefined)
+  // Synced authenticators can report a constant zero signature counter.
+  const bodies = options.map(option => ({ action: 'verifyAuthentication', data: {
+    challengeId: option.challengeId,
+    response: assertionResponse(f, option.options.challenge, { count: 0 })
+  } }))
+  const results = await Promise.all(bodies.map(body => call(passkey, body)))
+  assert.ok(results.every(result => result.code === 0))
+  for (const [index, option] of options.entries()) {
+    assert.equal(records.has(blob.passkeyChallengeKey(option.challengeId)), false)
+    assert.ok(records.has(blob.consumedDocumentKey(blob.passkeyChallengeKey(option.challengeId))))
+    assert.equal((await call(passkey, bodies[index])).code, 1000)
+  }
+})
+
+test('a failed login start cannot delete an ongoing registration and registrations do not replace challenges', async () => {
+  const start = () => call(passkey, { action: 'generateRegistrationOptions', data: { username: 'admin', token: env.ADMIN_TOKEN } })
+  const first = await start()
+  const key = blob.passkeyChallengeKey(first.data.challengeId)
+  const before = structuredClone(records.get(key))
+  const missing = await call(passkey, { action: 'generateAuthenticationOptions', data: { username: 'admin' } })
+  assert.equal(missing.code, 1404)
+  assert.deepEqual(records.get(key), before)
+  const second = await start()
+  assert.equal(second.code, 0)
+  assert.deepEqual(records.get(key), before)
+  assert.ok(records.has(blob.passkeyChallengeKey(second.data.challengeId)))
+})
+
+test('cancelling one Passkey ceremony preserves other ceremonies and replay receipts', async () => {
+  const f = fixture(); seedCredential(f)
+  const first = await authenticationOptions()
+  const second = await authenticationOptions()
+  const firstKey = blob.passkeyChallengeKey(first.challengeId)
+  records.get(blob.passkeyUserKey(f.userId)).currentChallengeId = second.challengeId
+  const cancel = () => call(passkey, { action: 'cancelChallenge', data: { challengeId: first.challengeId } })
+  assert.equal((await cancel()).code, 0)
+  assert.equal((await cancel()).code, 0)
+  assert.equal(records.has(firstKey), false)
+  assert.ok(records.has(blob.consumedDocumentKey(firstKey)))
+  assert.ok(records.has(blob.passkeyChallengeKey(second.challengeId)))
+  assert.equal(records.get(blob.passkeyUserKey(f.userId)).currentChallengeId, second.challengeId)
+  assert.equal((await call(passkey, { action: 'verifyAuthentication', data: {
+    challengeId: second.challengeId, response: assertionResponse(f, second.options.challenge)
+  } })).code, 0)
+  assert.equal(records.get(blob.passkeyUserKey(f.userId)).currentChallengeId, undefined)
+})
+
+test('cancellation deletes expired raw challenges while retaining existing receipts', async () => {
+  const f = fixture(); seedCredential(f)
+  const options = await authenticationOptions()
+  const key = blob.passkeyChallengeKey(options.challengeId)
+  const receiptKey = blob.consumedDocumentKey(key)
+  const receipt = { expiresAt: Date.now() - 1000, consumedAt: Date.now() - 2000 }
+  records.get(key).expiresAt = receipt.expiresAt
+  records.set(receiptKey, receipt)
+  records.get(blob.passkeyUserKey(f.userId)).currentChallengeId = options.challengeId
+  const result = await call(passkey, { action: 'cancelChallenge', data: { challengeId: options.challengeId } })
+  assert.equal(result.code, 0)
+  assert.equal(records.has(key), false)
+  assert.deepEqual(records.get(receiptKey), receipt)
+  assert.equal(records.get(blob.passkeyUserKey(f.userId)).currentChallengeId, undefined)
+  assert.ok(records.has(blob.passkeyCredentialKey(f.id)))
+})
+
+test('cancellation can finish a failed raw deletion without removing the consumption receipt', async () => {
+  const f = fixture(); seedCredential(f)
+  const options = await authenticationOptions()
+  const key = blob.passkeyChallengeKey(options.challengeId)
+  let failOnce = true
+  mock.method(Store.prototype, 'delete', async (target) => {
+    if (target === key && failOnce) {
+      failOnce = false
+      throw new Error('Temporary delete failure')
+    }
+    records.delete(target)
+  })
+  const cancel = () => call(passkey, { action: 'cancelChallenge', data: { challengeId: options.challengeId } })
+  assert.equal((await cancel()).code, 1000)
+  assert.ok(records.has(key))
+  const receiptKey = blob.consumedDocumentKey(key)
+  const receipt = structuredClone(records.get(receiptKey))
+  assert.ok(receipt)
+  assert.equal((await cancel()).code, 0)
+  assert.equal(records.has(key), false)
+  assert.deepEqual(records.get(receiptKey), receipt)
+})
+
+test('parallel authentication never regresses a credential signature counter', async () => {
+  const f = fixture(); seedCredential(f)
+  const options = await Promise.all([authenticationOptions(), authenticationOptions()])
+  const results = await Promise.all(options.map((option, index) => call(passkey, { action: 'verifyAuthentication', data: {
+    challengeId: option.challengeId, response: assertionResponse(f, option.options.challenge, { count: index + 1 })
+  } })))
+  assert.equal(results[1].code, 0)
+  assert.ok([0, 1000].includes(results[0].code), 'an out-of-order lower signature counter may be rejected')
+  assert.equal(records.get(blob.passkeyCredentialKey(f.id)).counter, 2)
+})
+
+test('concurrent registrations preserve the existing single-credential replacement policy', async () => {
+  const fixtures = [fixture(), fixture()]
+  const options = await Promise.all(fixtures.map(() => call(passkey, {
+    action: 'generateRegistrationOptions', data: { username: 'admin', token: env.ADMIN_TOKEN }
+  })))
+  const results = await Promise.all(fixtures.map((f, index) => call(passkey, { action: 'verifyRegistration', data: {
+    challengeId: options[index].data.challengeId,
+    response: registrationResponse(f, options[index].data.options.challenge)
+  } })))
+  assert.ok(results.every(result => result.code === 0))
+  const user = records.get(blob.passkeyUserKey(fixtures[0].userId))
+  assert.equal(user.credentialIds.length, 1)
+  const remaining = fixtures.filter(f => records.has(blob.passkeyCredentialKey(f.id)))
+  assert.equal(remaining.length, 1)
+  assert.equal(user.credentialIds[0], remaining[0].id)
+})

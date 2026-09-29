@@ -3,7 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import ThemeSwitcher from './components/common/ThemeSwitcher.vue'
+
 import { applyThemeMode, getStoredThemeMode, saveThemeMode } from './theme.js'
+import { requestJson } from './utils/requestJson.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -15,6 +17,9 @@ const themeMode = ref(getStoredThemeMode())
 const systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
 
 const oidcMessage = ref('')
+const authMessage = ref('')
+const lifecycleController = new AbortController()
+let tokenCheckController = null
 
 const setThemeMode = (mode) => {
   themeMode.value = mode
@@ -29,25 +34,68 @@ const handleSystemThemeChange = ({ matches }) => {
 }
 
 const handleLogin = (newToken) => {
+  if (lifecycleController.signal.aborted) return
+  tokenCheckController?.abort()
   token.value = newToken
   localStorage.setItem('open_kounter_token', newToken)
   isLoggedIn.value = true
+  isLoading.value = false
+  authMessage.value = ''
 }
 
 const handleLogout = () => {
+  tokenCheckController?.abort()
   token.value = ''
   localStorage.removeItem('open_kounter_token')
   isLoggedIn.value = false
+  authMessage.value = ''
   router.push('/')
 }
 
 const isNotFoundPage = computed(() => route.name === 'NotFound')
+
+const verifyStoredToken = async () => {
+  if (!token.value || lifecycleController.signal.aborted) return
+  tokenCheckController?.abort()
+  const controller = new AbortController()
+  tokenCheckController = controller
+  const checkedToken = token.value
+  isLoading.value = true
+  isLoggedIn.value = false
+  authMessage.value = ''
+  try {
+    const data = await requestJson('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: checkedToken }),
+      signal: controller.signal
+    })
+    if (controller.signal.aborted || lifecycleController.signal.aborted || token.value !== checkedToken) return
+    if (data.code === 0 && data.data?.authorized === true) {
+      isLoggedIn.value = true
+    } else if (data.code === 1000 && ['Invalid token or unauthorized', 'Not initialized'].includes(data.message)) {
+      // Only explicit credential rejection may remove a saved token.
+      token.value = ''
+      localStorage.removeItem('open_kounter_token')
+      authMessage.value = '已保存的 Token 已失效，请重新登录。'
+    } else {
+      authMessage.value = '暂时无法验证已保存的 Token，凭证已保留，请重试。'
+    }
+  } catch (e) {
+    if (!controller.signal.aborted && !lifecycleController.signal.aborted) {
+      authMessage.value = `${e.message}；已保留登录凭证，请重试验证。`
+    }
+  } finally {
+    if (!controller.signal.aborted && !lifecycleController.signal.aborted) isLoading.value = false
+  }
+}
 
 onMounted(async () => {
   systemThemeQuery.addEventListener('change', handleSystemThemeChange)
 
   // 等待路由就绪，防止 404 页面判定错误
   await router.isReady()
+  if (lifecycleController.signal.aborted) return
 
   // 处理 OIDC 回调参数
   const urlParams = new URLSearchParams(window.location.search)
@@ -74,13 +122,14 @@ onMounted(async () => {
   if (oidcSession) {
     // 用 OIDC session 换取实际 token
     try {
-      const res = await fetch('/api/auth', {
+      const data = await requestJson('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'oidc_verify', oidcSession })
+        body: JSON.stringify({ action: 'oidc_verify', oidcSession }),
+        signal: lifecycleController.signal
       })
-      const data = await res.json()
-      if (data.code === 0 && data.data.token) {
+      if (lifecycleController.signal.aborted) return
+      if (data.code === 0 && typeof data.data?.token === 'string' && data.data.token) {
         handleLogin(data.data.token)
         isLoading.value = false
         return
@@ -88,36 +137,22 @@ onMounted(async () => {
         oidcMessage.value = data.message || 'OIDC 登录失败'
       }
     } catch (e) {
-      console.error('OIDC session verify error:', e)
-      oidcMessage.value = 'OIDC 登录验证失败'
+      if (lifecycleController.signal.aborted) return
+      // The one-use session may already be consumed; restart the OIDC flow instead of replaying it.
+      oidcMessage.value = `OIDC 登录验证失败：${e.message}。请重新发起 OIDC 登录。`
     }
   }
   
   if (token.value) {
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token.value })
-      })
-      const data = await res.json()
-      if (data.code === 0) {
-        isLoggedIn.value = true
-      } else {
-        handleLogout()
-      }
-    } catch (e) {
-      console.error(e)
-      handleLogout()
-    } finally {
-      isLoading.value = false
-    }
+    await verifyStoredToken()
   } else {
     isLoading.value = false
   }
 })
 
 onBeforeUnmount(() => {
+  lifecycleController.abort()
+  tokenCheckController?.abort()
   systemThemeQuery.removeEventListener('change', handleSystemThemeChange)
 })
 </script>
@@ -169,6 +204,10 @@ onBeforeUnmount(() => {
       </header>
       
       <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div v-if="authMessage && !isLoggedIn" role="status" class="mb-6 max-w-md mx-auto space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-400">
+          <p>{{ authMessage }}</p>
+          <button v-if="token" class="button-secondary button-compact" @click="verifyStoredToken">重试验证已保存的 Token</button>
+        </div>
         <!-- OIDC 消息提示 -->
         <div 
           v-if="oidcMessage && !isLoggedIn" 
