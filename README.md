@@ -89,11 +89,15 @@ Open Kounter 服务地址：https://counter.example.com
 手动部署配置：
 
 - 框架预设：Vite（与 `edgeone.json` 中的 `framework: "vite"` 一致）
-- 构建命令：`npm run build`
+- Makers 构建命令：`npm run build:makers`（前端构建后生成私有路由及定时配置）
 - 输出目录：`dist`
 - Node 版本：`22`
 
 平台文档：[Cloud Functions](https://pages.edgeone.ai/document/cloud-functions) · [Blob 存储](https://pages.edgeone.ai/document/blob-storage)。仓库保留 EdgeOne Pages 的目录及 SDK 命名，平台界面也可能显示为 EdgeOne Makers。
+
+`npm run build` 继续用于本地前端构建。Makers 部署须使用 `edgeone.json` 中的 `npm run build:makers`，输出字段为官方 `outputDirectory`。它生成 `.edgeone/routes.json`，供平台保留现有函数路由、静态资源优先匹配及 SPA fallback，并注册原生定时任务；该文件不在 `dist/` 内。
+
+manifest 生成器适配本仓库的静态 JavaScript 函数入口和 SPA。若新增动态函数路由、其它函数运行时、框架默认导出、Middleware、Agents 或额外的 `headers` / `redirects` / `rewrites`，须同步扩展生成器；当前遇到这些不支持的配置会明确中止构建，避免静默丢失路由配置。
 
 ### 为什么从 KV 切换到 Blob
 
@@ -154,6 +158,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │       ├── _blobStore.js   # Store 工厂、Key、导入校验与锁
 │       ├── _counterValidation.js # 计数参数与来源白名单校验
 │       ├── _challengeCleanup.js # 过期 Challenge 分批扫描与断点
+│       ├── _scheduledCleanupAuth.js # 构建/运行时共用的定时清理专用鉴权
 │       ├── _legacyMigration.js # 旧 KV 导入
 │       ├── _oidc.js        # Discovery、JWKS、PKCE 和 Cookie
 │       ├── _passkey.js     # WebAuthn 验签与旧凭证兼容
@@ -162,7 +167,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │       ├── init.js         # 初始化与迁移接口
 │       ├── passkey.js      # Passkey 相关逻辑
 │       ├── maintenance/
-│       │   └── challenges.js # 管理员手动清理
+│       │   └── challenges.js # 管理员手动及原生定时清理
 │       └── oidc/           # OIDC 单点登录
 │           ├── login.js    # OIDC 登录发起
 │           ├── callback.js # OIDC 回调处理
@@ -195,6 +200,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 │   └── theme.js            # 主题解析与持久化
 ├── tests/                  # 认证、导入、锁与请求乱序回归测试
 ├── docs/blob-concurrency.md # Blob 并发设计与遗留锁恢复
+├── scripts/build-makers-manifest.mjs # 生成私有路由及定时任务配置
 ├── other/                  # README 的当前版本界面截图
 ├── edgeone.json            # EdgeOne 配置文件
 ├── index.html              # HTML 入口
@@ -435,7 +441,9 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 
 - **URL**：`POST /api/maintenance/challenges`
 - **手动鉴权**：`Authorization: Bearer <管理员 Token>`，复用管理 API 鉴权；Body 可传 `{}`。
-- 调用方不能指定清理前缀、Key 或过期时间。
+- **定时鉴权**：无 `Authorization` 时，接受私有定时配置生成的 `{ "cleanupToken": "<清理专用凭证>" }`，请求体最多 1024 字节。配置密钥缺失、凭证错误或请求体无效均拒绝；带有 `Authorization` 的请求只按管理员鉴权，不回退到定时凭证。
+- 请求体限制按原始流字节计算，兼容 Makers 将 `request.body` 包装为已解析 JSON 的运行时行为。
+- 调用方不能指定清理前缀、Key 或过期时间。专用凭证仅被此端点接受，不能用于其它管理 API。
 - **响应示例**：`{ "code": 0, "data": { "scanned": 100, "deleted": 80, "skipped": 20, "failed": 0, "hasMore": true } }`。
 
 | 字段 | 含义 |
@@ -450,13 +458,26 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 
 回收与旧 KV 迁移共用不可抢占锁，锁忙时本次失败，稍后重试。回收不删除 `auth/consumed/` 回执、Passkey 凭证、用户数据或其它锁；相关恢复边界见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 
-当前仅提供管理员手动调用，尚未配置定时回收。
+#### Makers 原生定时调用
+
+公开的 `edgeone.json` 声明任务 `passkey-challenge-cleanup`：北京时间每天 **03:00**（`Asia/Shanghai`）POST 到 `/api/maintenance/challenges`，每次运行上述一批回收。`hasMore: true` 时由下一次运行续扫，也可以管理员手动继续；每日一批不保证当天清空任意规模的积压。
+
+启用步骤：
+
+1. 在 Makers 项目的目标部署环境中配置 `OPEN_KOUNTER_CLEANUP_SECRET`，使用密码管理器生成至少 32 字符的随机密钥；同一环境的构建与函数运行时必须能读到相同值，建议只为生产环境配置。
+2. 使用 `npm run build:makers` 构建并部署。脚本从密钥派生固定清理用途的 HMAC 凭证，仅将凭证写入权限为 `0600`、已被 Git 忽略的 `.edgeone/routes.json` 的 `schedules[].payload`，不写入根 `edgeone.json`、前端资源或日志。
+3. 在 Makers 控制台检查任务和执行日志。已通过专用凭证鉴权的执行会输出 `passkey_challenge_cleanup` 统计日志，不输出请求体、密钥或凭证；关注 `failed` 和 `hasMore`，失败后可手动重试或等待后续运行。
+
+原生定时任务使用静态 JSON payload，因此专用凭证是仅允许清理的可重放权限凭证，不是平台调度身份签名。轮换密钥必须重新构建并部署以同步 payload。密钥缺失时，构建产物不注册此任务，保留手动清理并输出停用说明；配置了不足 32 字符的非空密钥则构建失败，避免误用弱密钥。每次 Makers 构建都会重新生成私有 manifest，避免沿用旧凭证。
+
+不要将 `.edgeone/routes.json` 作为静态文件上传或共享。直接上传预构建 `.edgeone` 时，应确保它刚由 `build:makers` 与 Makers 构建流程生成，密钥与目标运行环境一致。原生调度与构建输出约定见 [定时配置](https://pages.edgeone.ai/zh/document/edgeone-json#schedules) 与 [构建输出规范](https://pages.edgeone.ai/zh/document/building-output-configuration)。
 
 ## 环境变量一览
 
 | 变量名 | 必需 | 说明 |
 |--------|------|------|
 | `OPEN_KOUNTER_BLOB_STORE` | 否 | 自定义 Blob Store 名称，默认 `open-kounter` |
+| `OPEN_KOUNTER_CLEANUP_SECRET` | 启用定时清理时需要 | 至少 32 字符的随机密钥；构建与函数运行时保持一致。缺失时不注册定时任务，手动清理仍可用；轮换后需重新构建部署，禁止使用 `VITE_` 前缀或公开该值 |
 | `OPEN_KOUNTER` | 否 | 旧 KV 命名空间绑定，仅在旧数据迁移期间需要；不是普通字符串变量 |
 | `ADMIN_TOKEN` | 否 | 预设管理员 Token（优先级高于 Blob 中存储的 Token） |
 | `PASSKEY_RP_ID` | 否 | Passkey RP ID，默认使用当前域名 |
@@ -508,7 +529,7 @@ OIDC 绑定身份会保存在 Blob 的 `system/state.json` 中；登录过程中
 - **Passkey**：旧凭证在成功验签后转换公钥格式；不可验证时使用 Token 登录后重新绑定。平台内部请求域名与公开域名不同时，设置 `PASSKEY_ORIGIN`。
 - **OIDC**：Provider 需支持 PKCE S256。绑定改为带 Bearer 鉴权的 POST，旧的 `?mode=bind&token=...` 调用方式不再接受；后台界面已适配。
 - **进行中的登录**：旧版 challenge、OIDC Session 和未经过新版验签的管理 Token 会被拒绝，重新发起登录或绑定即可。
-- **Challenge 回收**：新增管理员分批手动回收接口；新流程不再互相替换 Challenge。混用旧版本部署时，旧版本仍可能删除旧 `currentChallengeId` 指向的流程，应一并升级。消费回执继续保留，不属于本次删除范围。
+- **Challenge 回收**：新流程不再互相替换 Challenge。配置 `OPEN_KOUNTER_CLEANUP_SECRET` 并使用新的 Makers 构建命令可启用每日原生回收，手动接口继续可用。混用旧版本部署时，旧版本仍可能删除旧 `currentChallengeId` 指向的流程，应一并升级。消费回执继续保留，不属于本次自动删除范围。
 - **导入数据**：导入是覆盖操作；完整校验后再写入，不预先删除计数文档。多个 Blob 文档之间没有事务。
 - **参数校验**：设置计数与导入统一使用非负安全整数，批量递增最多 100 项；不再接受截断后有效的混合文本。历史数据中的非法计数或白名单需修正后再导入，升级不会自动清理或迁移已有数据。
 - **遗留锁**：函数异常终止可能留下锁，当前版本不会自动抢占。恢复前必须暂停写入并确认所有在途操作已结束，按 [恢复步骤](docs/blob-concurrency.md#遗留锁恢复) 处理。
@@ -524,6 +545,8 @@ npm run build
 回归测试使用内存 Blob、本地生成的签名密钥和浏览器请求模拟，覆盖 Passkey、OIDC 完整绑定/登录、重复消费、计数及白名单校验、导入失败、锁竞争、适配器请求合并与 UV 标记、登录故障处理及请求乱序，不连接线上存储。服务端认证库在 Node.js 20 上验证；构建继续使用 `edgeone.json` 配置的 Node.js 22。
 
 Challenge 回归还覆盖并行流程、独立取消、签名计数器不回退、前端迟到 ID 清理、回收分页断点、失败重试、鉴权及迁移互斥。
+
+原生调度回归验证专用凭证的用途隔离、无效请求无写入、私有 manifest 的路由与权限、密钥轮换以及静态产物不含凭证。Makers 完整构建需运行 `npm run build:makers`；密钥缺失时仅验证停用路径，启用路径应在隔离环境使用临时测试密钥验证，不连接线上 Blob。
 
 计数器仍使用 `system/counters.json` 的原有格式。Blob 强一致读取不等于原子递增；锁等待超时会报错，不再自动抢占过期锁。函数异常终止后可能需要维护恢复。完整取舍、恢复步骤及后续方案见 [Blob 并发与恢复设计](docs/blob-concurrency.md)。
 

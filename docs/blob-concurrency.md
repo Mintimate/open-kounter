@@ -49,7 +49,13 @@ Challenge、OIDC state/session 和管理凭证通过 `auth/consumed/<编码后�
 
 旧 KV 导入可能重写原 ID，因此清理和显式取消与迁移共用 `locks/legacy-migration.json`，禁止仅检查锁是否存在后无锁删除。回收只尝试获取一次锁，失败可稍后重试；不可自动清理遗留锁。回收约 10 秒后停止启动新的操作，但会等待已开始的读写完成再释放锁，不能把预算耗尽视为在途存储操作已经停止。函数仍可能因平台终止留下锁，恢复规则不变。
 
-读取或删除暂时失败会保留重试位置，允许重复调用；坏 JSON 留存并跳过，下一轮扫描再检查。每次请求返回 `scanned`、`deleted`、`skipped`、`failed`、`hasMore`，`hasMore: true` 表示还需继续调用。过期仅决定文档失效，物理删除由取消、管理员手动调用触发。
+读取或删除暂时失败会保留重试位置，允许重复调用；坏 JSON 留存并跳过，下一轮扫描再检查。每次请求返回 `scanned`、`deleted`、`skipped`、`failed`、`hasMore`，`hasMore: true` 表示还需继续调用。过期仅决定文档失效，物理删除由取消、管理员手动调用或原生定时回收触发。
+
+## Makers 原生定时回收
+
+`edgeone.json` 声明每天 03:00（`Asia/Shanghai`）调用一次 `/api/maintenance/challenges`。`npm run build:makers` 在前端构建后生成私有 `.edgeone/routes.json`，从构建环境 `OPEN_KOUNTER_CLEANUP_SECRET` 派生仅用于此端点的 HMAC 凭证并注入定时 payload。函数从 `context.env` 读取同一密钥校验；管理员 Bearer 手动调用继续有效。
+
+密钥缺失时不注册定时任务，弱密钥使 Makers 构建失败，轮换密钥后须重新构建部署。凭证是有限权限的可重放能力，不代表可信平台请求身份；不得将密钥或派生凭证写入公开配置、静态资源或日志。每次定时运行遵循原有 100 条、协作预算、迁移互斥与回执保留边界，不延长锁、不强制清理遗留锁，也不保证一天内清空大量积压；断点由下一次运行继续处理。
 
 ## 高并发下一阶段选项
 

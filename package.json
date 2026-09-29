@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:makers": "vite build && node scripts/build-makers-manifest.mjs",
     "test": "node --test tests/*.test.js",
     "preview": "vite preview"
   },

@@ -52,6 +52,7 @@
 │       ├── _blobStore.js       # Blob Store 工厂 + Key 命名规则 + 读写工具
 │       ├── _counterValidation.js # 计数参数与来源白名单统一校验
 │       ├── _challengeCleanup.js # 过期 Challenge 分批回收与断点
+│       ├── _scheduledCleanupAuth.js # 定时清理专用凭证的派生与校验
 │       ├── _oidc.js            # OIDC Discovery/JWKS、PKCE、Cookie 与 Token 校验
 │       ├── _passkey.js         # WebAuthn 验签、可信 Origin 与旧凭证公钥兼容
 │       ├── _legacyMigration.js # 旧 KV → Blob 迁移逻辑
@@ -60,7 +61,7 @@
 │       ├── init.js             # 首次初始化与迁移触发
 │       ├── passkey.js          # Passkey 注册 / 登录 / 管理
 │       ├── maintenance/
-│       │   └── challenges.js   # 管理员手动清理过期 Challenge
+│       │   └── challenges.js   # 手动及原生定时清理过期 Challenge
 │       └── oidc/
 │           ├── login.js        # OIDC 登录发起（state / nonce / code_verifier 写入 Blob）
 │           ├── callback.js     # OIDC 回调换码 + ID Token 校验 + 绑定/登录
@@ -96,6 +97,7 @@
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
 ├── tests/                      # Node 内置测试：认证、存储、适配器、登录与请求乱序
 ├── docs/blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
+├── scripts/build-makers-manifest.mjs # 生成 Makers 私有路由/定时配置
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
 ├── index.html
@@ -500,13 +502,19 @@ export async function onRequest({ request, env }) {
 
 认证库仅用于 Cloud Functions，不导入前端。为兼容现有 Bearer 登录架构，成功的 Passkey/OIDC 登录交换可以返回实际管理 Token；状态查询和其它管理响应仍禁止泄露凭证。
 
-### 8.9 Challenge 手动回收
+### 8.9 Challenge 回收与原生定时任务
 
-- `POST /api/maintenance/challenges` 必须先经 `requireAuth`，不接受调用方指定 Key、前缀或截止时间；OPTIONS 和 JSON 继续使用 `_api.js`。返回 `scanned` / `deleted` / `skipped` / `failed` / `hasMore`，不返回凭证内容。
+- `POST /api/maintenance/challenges` 有 `Authorization` 时必须经 `requireAuth`；没有该头时，仅接受 `_scheduledCleanupAuth.js` 校验的 JSON `cleanupToken`（请求体最多 1024 字节）。不能将该凭证用于其它管理端点，不根据自报 cron 头、URL 参数或 `scheduled: true` 放行。鉴权前禁止扫描或写入 Blob。
+- 接口不接受调用方指定 Key、前缀或截止时间；OPTIONS 和 JSON 继续使用 `_api.js`。返回 `scanned` / `deleted` / `skipped` / `failed` / `hasMore`，不返回凭证内容。专用凭证调用仅记录脱敏执行统计，不记录请求体。
+- Makers 会用已解析 JSON 遮蔽 `Request.body`；有界读取须通过原型 getter 获取原始流，不能直接调用 `request.body.getReader()`，也不能用重新序列化后的 JSON 大小替代原始字节限制。
 - `_challengeCleanup.js` 只回收 `getStoragePrefixes().passkeyChallenges` 中已过期至少 60 秒的原文档；强一致分页每次最多 100 条，约 10 秒协作预算，在途操作完成后才保存进度和释放锁，禁止超时后放任写操作继续执行。
 - 维护 Key 集中在 `challengeCleanupStateKey()`；SDK 原始分页游标不能用返回 Key 替代。读取或删除临时失败保留重试位置，坏 JSON 跳过留存，下一轮全扫再检查。
 - 回收与旧 KV 迁移共用 `legacyMigrationLockKey()`，获取只尝试一次，不按 TTL 抢占。只删除过期原文档，不删除 `auth/consumed/`、凭证、用户或其它锁；消费回执按 `docs/blob-concurrency.md` 的条件单独维护。
-- 当前仅提供手动接口，不配置定时任务，也不在登录时全量扫描；没有调用接口时，物理残留不会自动回收。
+- `edgeone.json` 声明原生任务 `passkey-challenge-cleanup`，每天 03:00（`Asia/Shanghai`）执行一批，不在登录时全量扫描；积压通过断点由后续运行或手动调用继续处理。
+- Makers 构建命令为 `npm run build:makers`，普通 `npm run build` 保留前端构建。`scripts/build-makers-manifest.mjs` 根据公开配置生成私有 `.edgeone/routes.json`，保留函数、静态文件及 SPA 路由；根配置不得写入调度凭证，构建产物不得进入 `dist/` 或公开 assets。
+- 生成器当前仅支持静态 JavaScript handler 路由与 SPA；动态路由、其它运行时、框架默认导出、Middleware、Agents 或非空 `headers` / `redirects` / `rewrites` 需先扩展生成器并补回归，不能忽略这些配置继续构建。
+- 密钥 `OPEN_KOUNTER_CLEANUP_SECRET` 至少 32 字符，构建与运行时一致；`createScheduledCleanupToken` 用固定用途 `open-kounter:maintenance:passkey-challenges:v1` 派生 HMAC-SHA256 base64url 凭证。校验严格格式并使用恒时比较。凭证可重放但权限只限清理，不能宣称它证明了平台调用身份。
+- 缺少密钥时产物省略定时任务、保留手动入口；非空弱密钥使 Makers 构建失败。每次原子重写 manifest 并设权限 `0600`；轮换密钥必须重新构建部署。配置输出字段使用 `outputDirectory`。
 
 ---
 
@@ -549,6 +557,7 @@ npm run build           # 构建必须通过，无新告警
 | 变量名 | 必需 | 用途 |
 |---|---|---|
 | `OPEN_KOUNTER_BLOB_STORE` | 否 | 自定义 Blob Store 名称，默认 `open-kounter` |
+| `OPEN_KOUNTER_CLEANUP_SECRET` | 启用定时清理时需要 | 至少 32 字符随机密钥，构建与运行时一致；缺失停用原生定时任务，手动清理仍可用，轮换需重新构建部署；禁止前端暴露 |
 | `OPEN_KOUNTER` | 否（仅迁移期） | 旧版 KV 命名空间绑定，仅 `edge-functions/legacy-api/migrate.js` 使用 |
 | `ADMIN_TOKEN` | 否 | 预设管理员 Token；优先级高于 Blob 中存储的 token |
 | `PASSKEY_RP_ID` | 否 | Passkey RP ID，默认使用当前域名 hostname |
@@ -589,7 +598,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **Phase 3**：亮色 / 跟随系统 / 暗色三段式主题切换（运行时 Token 映射 + 系统主题监听）
 - [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验、列表/概览共用读取、请求乱序保护；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
 - [x] **计数与登录故障处理**：统一计数/白名单校验及批量上限，适配器合并请求并在确认成功后记录 UV；登录检测区分未知与未初始化，网络失败保留 Token 并支持重试。
-- [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消、签名计数器串行更新及受鉴权的分批手动回收接口；消费回执保留。
+- [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消、签名计数器串行更新、受鉴权的分批回收接口及可通过专用密钥启用的 Makers 原生每日调度；消费回执保留。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。

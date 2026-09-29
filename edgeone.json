@@ -1,6 +1,15 @@
 {
-  "buildCommand": "npm run build",
-  "outputDir": "dist",
+  "buildCommand": "npm run build:makers",
+  "outputDirectory": "dist",
   "nodeVersion": "22",
-  "framework": "vite"
+  "framework": "vite",
+  "schedules": [
+    {
+      "name": "passkey-challenge-cleanup",
+      "cron": "0 3 * * *",
+      "timezone": "Asia/Shanghai",
+      "path": "/api/maintenance/challenges",
+      "method": "POST"
+    }
+  ]
 }
