@@ -20,6 +20,14 @@
 - **同步更新文档**：修改路由 / API 命名约定 / Blob Schema / 环境变量 / UI 公共类 / 规范本身时，必须同步更新本文件与 [README.md](README.md)
 - **登录态在 `App.vue` 中通过 `isLoggedIn` + `<router-view>` props 下发**，不要绕过 `App.vue` 自行从 `localStorage` 读取 token 来判断登录态
 
+### CNB 按钮部署
+
+- `.cnb/web_trigger.yml` 在 `main` 分支显示「部署到 EdgeOne Makers」，对应 `.cnb.yml` 的 `main.web_trigger_deploy_makers`；按钮事件与已有 `push` 流程独立，不引用维护者的密钥仓库。
+- 表单接收 `EDGEONE_PAGES_API_TOKEN` 和 `EDGEONE_MAKERS_PROJECT_NAME`，项目名默认 `open-kounter`。CNB 不支持密码输入框，不得承诺表单或构建参数按密钥保存；公开仓库日志可能公开可见。
+- `scripts/deploy-makers.mjs --validate` 在安装依赖前校验输入；正常执行从环境读取 Token，以无 shell 的参数数组运行 CLI，过滤 stdout/stderr 中的 Token 并传递失败退出码。禁止把 Token 拼入 YAML 脚本或命令行参数、打印环境变量、缓存或共享部署工作目录。
+- 流水线使用 Node.js 22 与固定的 `edgeone@1.6.13`，从仓库根目录执行 `makers deploy --env production --json`，由 CLI 按 `edgeone.json` 执行 `build:makers`。部署结果 URL 必须保留查询参数；已有同名项目会被更新且须支持直接上传。
+- 修改按钮或流水线后，使用 `cnb-pipeline` 技能的校验器验证两份 YAML，并运行部署脚本回归；测试只能使用假的 CLI，不连接真实 Makers 项目。
+
 ---
 
 ## 3) 项目架构
@@ -44,6 +52,8 @@
 
 ```tree
 .
+├── .cnb/web_trigger.yml        # CNB 手动部署按钮与输入表单
+├── .cnb.yml                   # CNB 按钮部署、推送同步与自动部署流水线
 ├── client/
 │   └── adapter.js              # 客户端适配器（兼容 LeanCloud AV.Counter API）
 ├── cloud-functions/            # 主后端逻辑（运行于 EdgeOne Cloud Functions）
@@ -98,6 +108,7 @@
 ├── tests/                      # Node 内置测试：认证、存储、适配器、登录与请求乱序
 ├── docs/blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
 ├── scripts/build-makers-manifest.mjs # 生成 Makers 私有路由/定时配置
+├── scripts/deploy-makers.mjs   # CNB 部署参数校验、Token 脱敏与 CLI 调用
 ├── other/                      # 文档资源（演示图等）
 ├── edgeone.json                # EdgeOne 配置（构建命令 / 输出目录 / 函数路由）
 ├── index.html
@@ -567,6 +578,8 @@ npm run build           # 构建必须通过，无新告警
 | `OIDC_CLIENT_ID` | 否 | OIDC Client ID |
 | `OIDC_CLIENT_SECRET` | 否 | OIDC Client Secret（仅服务端使用，禁止下发前端） |
 | `OIDC_REDIRECT_URI` | 否 | OIDC 回调地址，必须与 OIDC Provider 注册地址完全一致 |
+| `EDGEONE_PAGES_API_TOKEN` | CNB 按钮部署时必需 | 仅用于部署 CLI 的 Makers API Token，不是管理员 Token；缺失或包含空白字符时在安装依赖前中止，不写入业务配置 |
+| `EDGEONE_MAKERS_PROJECT_NAME` | 否（仅 CNB 部署） | 表单默认 `open-kounter`，脚本在缺失或空白时同样回退；非法名称中止部署，不作为函数运行时配置 |
 
 新增环境变量必须：
 
@@ -578,6 +591,9 @@ npm run build           # 构建必须通过，无新告警
 
 ## 12) Git 约定
 
+- 主仓库为 `https://cnb.cool/Mintimate/tool-forge/open-kounter.git`；本地 `origin` 指向 CNB，`main` 跟踪 `origin/main`，开发分支基于 CNB 最新 `main` 创建，PR 目标为 CNB。
+- GitHub `https://github.com/Mintimate/open-kounter.git` 仅为 `main` 镜像，可保留为 `github` remote 供读取对比；禁止直接推送 GitHub 或配置反向同步。
+- `.cnb.yml` 的 `main.push` 同时触发镜像与生产部署；镜像插件必须显式 `branch: main`、`force: false`。发现两端分叉时先整合并保留历史，不得通过强推覆盖；按钮部署为独立事件。
 - 提交格式：`<type>(<scope>): <subject>`
 - type ∈ `feat` / `fix` / `refactor` / `style` / `docs` / `chore`
 - scope 推荐：`frontend` / `backend` / `oidc` / `passkey` / `counter` / `blob` / `migrate` / `docs`
@@ -599,6 +615,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **认证与可靠性修复**：WebAuthn/OIDC 验证、一次性凭证消费、导入校验、列表/概览共用读取、请求乱序保护；Blob 高并发与故障恢复方案见 `docs/blob-concurrency.md`，尚未迁移存储。
 - [x] **计数与登录故障处理**：统一计数/白名单校验及批量上限，适配器合并请求并在确认成功后记录 UV；登录检测区分未知与未初始化，网络失败保留 Token 并支持重试。
 - [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消、签名计数器串行更新、受鉴权的分批回收接口及可通过专用密钥启用的 Makers 原生每日调度；消费回执保留。
+- [x] **CNB 按钮部署**：使用自有 Makers Token 与项目名（默认 `open-kounter`）手动触发生产部署，独立于维护者的推送流水线。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。

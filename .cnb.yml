@@ -1,4 +1,17 @@
 main:
+  web_trigger_deploy_makers:
+    - name: "部署到 EdgeOne Makers"
+      docker:
+        image: node:22
+      stages:
+        - name: "检查部署参数"
+          script: node scripts/deploy-makers.mjs --validate
+        - name: "安装项目依赖"
+          script: npm ci
+        - name: "安装 EdgeOne CLI"
+          script: npm install --global edgeone@1.6.13
+        - name: "构建并部署"
+          script: node scripts/deploy-makers.mjs
   push:
     - name: "推送镜像"
       imports:
@@ -11,7 +24,8 @@ main:
             auth_type: https
             username: ${GIT_USERNAME}
             password: ${GIT_ACCESS_TOKEN}
-            force: true
+            branch: main
+            force: false
     - name: "构建产物"
       imports:
         - https://cnb.cool/Mintimate/secret/-/blob/main/EdgeOnePage.yaml
@@ -23,5 +37,5 @@ main:
       stages:
         - name: "部署流程"
           image: tencentcom/deploy-eopages:latest
-          script: 
+          commands:
             - edgeone pages deploy -n open-kounter -t $EO_SECRET

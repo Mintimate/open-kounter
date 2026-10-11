@@ -2,6 +2,10 @@
 
 Open Kounter 是一个基于 EdgeOne Pages Functions 和 Blob 存储的无服务器计数器服务，旨在替代 LeanCloud 为静态网站（如 Hexo）提供 PV/UV 统计功能。它包含一个完整的管理后台，支持数据管理、导入导出、域名白名单、旧版 KV 一键迁移、Passkey 无密码登录、OIDC 单点登录，以及亮色 / 跟随系统 / 暗色主题切换。
 
+**主仓库：[CNB](https://cnb.cool/Mintimate/tool-forge/open-kounter)**；[GitHub](https://github.com/Mintimate/open-kounter) 为单向同步的 `main` 分支镜像。开发和 PR 请以 CNB 为准。维护者本地的 `origin` 应指向 CNB，GitHub 可保留为 `github` remote 供读取对比。
+
+CNB 的 `main` 推送会触发 GitHub 镜像同步与生产部署。镜像只同步 `main`，不执行强推；若两端分叉，同步应失败并人工整合，避免覆盖 GitHub 独有提交。请勿直接向 GitHub 推送或配置反向同步。
+
 ## 功能概览
 
 | 功能 | 说明 |
@@ -99,6 +103,17 @@ Open Kounter 服务地址：https://counter.example.com
 
 manifest 生成器适配本仓库的静态 JavaScript 函数入口和 SPA。若新增动态函数路由、其它函数运行时、框架默认导出、Middleware、Agents 或额外的 `headers` / `redirects` / `rewrites`，须同步扩展生成器；当前遇到这些不支持的配置会明确中止构建，避免静默丢失路由配置。
 
+### 从 CNB 按钮部署到 EdgeOne Makers
+
+1. Fork [CNB 仓库](https://cnb.cool/Mintimate/tool-forge/open-kounter)，进入自己仓库的「代码」→ `main` 分支页面，点击 **部署到 EdgeOne Makers**。触发按钮需要仓库写权限。
+2. 填写自己的 **EdgeOne Makers Token**（在 Makers 控制台的 [API Token](https://pages.edgeone.ai/document/api-token) 页面创建），以及 **EdgeOne Makers 项目名**；项目名默认是 `open-kounter`，可修改。
+3. 确认后，CNB 使用 Node.js 22 安装依赖及固定版本的 EdgeOne CLI，从仓库根目录构建并部署到**生产环境**。项目不存在时自动创建；已有同名项目会更新部署，且须为支持 CLI 部署的「直接上传」类型。
+4. 等待流水线完成，从部署日志最后的 JSON 结果中打开 `url`。请保留完整查询参数；首次部署后继续按下文开启 Blob 并初始化管理员 Token。
+
+按钮定义在 `.cnb/web_trigger.yml`，对应 `.cnb.yml` 的 `main.web_trigger_deploy_makers` 事件。此流程不依赖维护者的密钥仓库；原有 `push` 自动同步与部署流程保持独立。CLI 自动执行 `edgeone.json` 的 `npm run build:makers`，同时构建前端、Cloud Functions 和 Edge Functions，无需手动上传 `dist`。
+
+**Token 输入说明**：CNB 当前的按钮表单只有普通文本输入，没有密码框；请仅在自己信任的仓库填写 Token，不要分享含 Token 的表单、构建参数或截图。公开仓库的构建日志可能公开可见。部署脚本从环境变量读取 Token，不将它拼入命令行参数，并过滤 CLI 输出中的 Token；这不代表 CNB 的输入参数会被平台作为密钥保存。此 Token 用于 Makers 部署，与 Open Kounter 的管理员 Token 不同。平台规则见 [CNB 按钮触发器](https://docs.cnb.cool/zh/build/web-trigger.html)、[CNB 角色权限](https://docs.cnb.cool/zh/guide/role-permissions.html) 和 [EdgeOne CLI](https://pages.edgeone.ai/document/edgeone-cli)。
+
 ### 为什么从 KV 切换到 Blob
 
 Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信息，但 KV 的全球同步是最终一致模型，在多节点场景下会有明显同步延迟。
@@ -150,6 +165,8 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 
 ```tree
 .
+├── .cnb/web_trigger.yml    # CNB 手动部署按钮与输入表单
+├── .cnb.yml                # CNB 按钮部署、推送同步与自动部署流水线
 ├── client/
 │   └── adapter.js          # 客户端适配器，模拟 LeanCloud 行为
 ├── cloud-functions/        # 主后端逻辑 (Blob API)
@@ -201,6 +218,7 @@ Open Kounter 早期使用 EdgeOne Pages KV 保存计数器、配置和认证信�
 ├── tests/                  # 认证、导入、锁与请求乱序回归测试
 ├── docs/blob-concurrency.md # Blob 并发设计与遗留锁恢复
 ├── scripts/build-makers-manifest.mjs # 生成私有路由及定时任务配置
+├── scripts/deploy-makers.mjs # CNB 参数校验、Token 脱敏与 Makers CLI 部署
 ├── other/                  # README 的当前版本界面截图
 ├── edgeone.json            # EdgeOne 配置文件
 ├── index.html              # HTML 入口
@@ -487,6 +505,10 @@ OIDC 相关接口用于单点登录绑定、登录回调和状态管理。
 | `OIDC_CLIENT_ID` | 否 | OIDC 客户端 ID |
 | `OIDC_CLIENT_SECRET` | 否 | OIDC 客户端密钥，仅保存在环境变量中 |
 | `OIDC_REDIRECT_URI` | 否 | OIDC 回调地址，例如 `https://your-domain.com/api/oidc/callback` |
+| `EDGEONE_PAGES_API_TOKEN` | CNB 按钮部署时必需 | 用户在按钮表单填写的 Makers API Token，仅供部署 CLI 鉴权，不是管理员 Token；缺失或包含空白字符时在安装依赖前中止 |
+| `EDGEONE_MAKERS_PROJECT_NAME` | 否（仅 CNB 部署） | Makers 目标项目名，表单默认 `open-kounter`；脚本对缺失或空白值同样回退该名称，非法名称中止部署 |
+
+最后两项仅用于 CNB 构建环境，无需添加到 Makers 项目的运行时环境变量中。
 
 ## 界面主题
 

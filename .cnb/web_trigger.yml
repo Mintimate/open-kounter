@@ -1,0 +1,18 @@
+branch:
+  - reg: ^main$
+    buttons:
+      - name: 部署到 EdgeOne Makers
+        description: 使用自己的 Token 部署 Open Kounter 到 Makers 生产环境；已有同名项目将更新部署。
+        event: web_trigger_deploy_makers
+        inputs:
+          EDGEONE_PAGES_API_TOKEN:
+            name: EdgeOne Makers Token
+            description: 从 Makers 控制台获取 API Token。此处为普通文本输入，请仅在自己信任的仓库中填写，勿分享含 Token 的表单或构建参数。
+            type: input
+            required: true
+          EDGEONE_MAKERS_PROJECT_NAME:
+            name: EdgeOne Makers 项目名
+            description: 不存在时自动创建；已有项目须为直接上传类型。
+            type: input
+            required: true
+            default: open-kounter
