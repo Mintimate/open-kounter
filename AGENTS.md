@@ -17,12 +17,14 @@
 - **先理解再改动**：定位组件、数据流、Blob Key 与边界，不基于猜测修改
 - **小步提交**：最小可行改动，每步可解释“为什么改、改了什么、如何验证”
 - **变更后验证**：`npm run build` 必须通过、无新增警告
-- **同步更新文档**：修改路由 / API 命名约定 / Blob Schema / 环境变量 / UI 公共类 / 规范本身时，必须同步更新本文件与 [README.md](README.md)
+- **同步更新文档**：修改路由 / API 命名约定 / Blob Schema / 环境变量 / UI 公共类 / 规范本身时，必须同步更新本文件与 §4 指定的文档；[README.md](README.md) 保留项目概览和文档导航
 - **登录态在 `App.vue` 中通过 `isLoggedIn` + `<router-view>` props 下发**，不要绕过 `App.vue` 自行从 `localStorage` 读取 token 来判断登录态
 
-### CNB 按钮部署
+### 部署方式与 CNB 按钮
 
+- README 和部署指南并列提供三种方式：Git Clone + CLI、CNB Fork 后的部署按钮、EdgeOne Makers 一键部署按钮。CNB Fork 前提只适用于 CNB 按钮方式，不能作为全部部署方式的前提。
 - `.cnb/web_trigger.yml` 在 `main` 分支显示「部署到 EdgeOne Makers」，对应 `.cnb.yml` 的 `main.web_trigger_deploy_makers`；按钮事件与已有 `push` 流程独立，不引用维护者的密钥仓库。
+- CNB 按钮方式的使用说明必须明确：先在 CNB 平台 Fork 本仓库，再进入自己 Fork 后的 CNB 仓库「代码」→ `main` 分支页面使用按钮；仅在 GitHub 上 Fork 不会提供 CNB 按钮，触发者须有对应仓库写权限。
 - 表单接收 `EDGEONE_PAGES_API_TOKEN` 和 `EDGEONE_MAKERS_PROJECT_NAME`，项目名默认 `open-kounter`。CNB 不支持密码输入框，不得承诺表单或构建参数按密钥保存；公开仓库日志可能公开可见。
 - `scripts/deploy-makers.mjs --validate` 在安装依赖前校验输入；正常执行从环境读取 Token，以无 shell 的参数数组运行 CLI，过滤 stdout/stderr 中的 Token 并传递失败退出码。禁止把 Token 拼入 YAML 脚本或命令行参数、打印环境变量、缓存或共享部署工作目录。
 - 流水线使用 Node.js 22 与固定的 `edgeone@1.6.13`，从仓库根目录执行 `makers deploy --env production --json`，由 CLI 按 `edgeone.json` 执行 `build:makers`。部署结果 URL 必须保留查询参数；已有同名项目会被更新且须支持直接上传。
@@ -106,7 +108,13 @@
 │   ├── utils/passkeyCeremony.js # 独立 Passkey 流程及取消清理
 │   └── theme.js                # 主题偏好读取、解析、应用与持久化
 ├── tests/                      # Node 内置测试：认证、存储、适配器、登录与请求乱序
-├── docs/blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
+├── docs/
+│   ├── deployment.md           # 部署、Blob、登录与环境变量配置
+│   ├── integration.md          # 网站接入、计数语义与 AI 迁移 Skill
+│   ├── api.md                  # API 参数、响应、鉴权及调用限制
+│   ├── maintenance.md          # 定时清理、升级与数据维护
+│   ├── development.md          # 主仓库工作流、目录职责与本地验证
+│   └── blob-concurrency.md     # Blob 并发边界、遗留锁恢复和后续设计
 ├── scripts/build-makers-manifest.mjs # 生成 Makers 私有路由/定时配置
 ├── scripts/deploy-makers.mjs   # CNB 部署参数校验、Token 脱敏与 CLI 调用
 ├── other/                      # 文档资源（演示图等）
@@ -145,6 +153,8 @@
 
 修改代码时，必须同步更新所有相关文档，确保文档与代码始终一致。
 
+[README.md](README.md) 仅保留项目介绍、功能概览、快速开始、截图和文档导航。详细步骤统一维护在 `docs/` 对应文档中，避免在首页重复完整 API、环境变量表或目录树。新增或调整文档时同步导航，并检查相对路径及标题锚点。
+
 ### 适用范围
 
 所有涉及以下变更的场景：
@@ -160,12 +170,16 @@
 
 | 代码变更位置 | 需同步更新的文档 |
 |---|---|
-| `cloud-functions/api/**`（新增 action / 端点） | [README.md](README.md) §API 接口文档 |
+| `cloud-functions/api/**`（新增 action / 端点） | [API 参考](docs/api.md) |
 | `cloud-functions/api/_blobStore.js`（新增 Key / Schema） | 本文件 §8 Blob Schema 表 |
 | `src/router/index.js`（新增路由） | 本文件 §7 |
 | `src/style.css` / `tailwind.config.js`（新增 Token / 公共类） | 本文件 §5.2 设计 Token 表 |
-| 新增环境变量 | 本文件 §9 + [README.md](README.md) §环境变量一览 |
-| 重构 / 迁移阶段性完成 | 本文件 §12 进度表、[README.md](README.md) |
+| 新增环境变量 | 本文件 §11 + [部署与配置](docs/deployment.md#环境变量) |
+| 部署配置 / CNB 按钮 / 登录流程 | 本文件相关章节 + [部署与配置](docs/deployment.md) |
+| 访客适配器 / AI 迁移使用方式 | [网站接入与 AI 迁移](docs/integration.md) |
+| 定时清理 / 升级行为 / 故障恢复 | [维护与升级](docs/maintenance.md)，存储边界同时更新 [Blob 并发与恢复设计](docs/blob-concurrency.md) |
+| 目录分层 / 开发命令 / 主仓库工作流 | 本文件相关章节 + [开发指南](docs/development.md) |
+| 重构 / 迁移阶段性完成 | 本文件 §13 进度表及对应 `docs/` 文档；影响概览或入口时同步 [README.md](README.md) |
 
 ### 执行步骤
 
@@ -558,8 +572,8 @@ npm run build           # 构建必须通过，无新告警
 - [ ] 无新增 `alert` / `window.confirm`（统一走 `ConfirmModal.vue` 与组件内 `message` 提示）
 - [ ] 敏感字段没有出现在 `console.log` / 响应明文中
 - [ ] import 已按 §6.6 分组
-- [ ] 相关文档（本文件 / README）已同步更新
-- [ ] 新增环境变量已在 README §环境变量一览 + 本文件 §11 登记
+- [ ] 相关文档（本文件 / `docs/` / README 导航）已同步更新，相对链接和标题锚点有效
+- [ ] 新增环境变量已在 [部署与配置](docs/deployment.md#环境变量) + 本文件 §11 登记
 
 ---
 
@@ -584,7 +598,7 @@ npm run build           # 构建必须通过，无新告警
 新增环境变量必须：
 
 1. 同步更新本表
-2. 同步更新 [README.md](README.md) §环境变量一览
+2. 同步更新 [部署与配置](docs/deployment.md#环境变量)
 3. 在使用处加入“缺失则降级 / 报错”的兜底逻辑，**不要让缺失变量直接导致 500**
 
 ---
@@ -616,6 +630,7 @@ npm run build           # 构建必须通过，无新告警
 - [x] **计数与登录故障处理**：统一计数/白名单校验及批量上限，适配器合并请求并在确认成功后记录 UV；登录检测区分未知与未初始化，网络失败保留 Token 并支持重试。
 - [x] **Passkey 生命周期**：独立 Challenge、前端按本次 ID 尽力取消、签名计数器串行更新、受鉴权的分批回收接口及可通过专用密钥启用的 Makers 原生每日调度；消费回执保留。
 - [x] **CNB 按钮部署**：使用自有 Makers Token 与项目名（默认 `open-kounter`）手动触发生产部署，独立于维护者的推送流水线。
+- [x] **文档分层**：README 精简为项目入口，部署、网站接入、API、维护和开发细节拆分至 `docs/`，同步文档维护映射与导航。
 - [ ] **Phase 4**：继续抽离公共 UI 类（按钮 / 输入框已完成；卡片待完成），减少模板原子类长串
 
 每个阶段完成后必须更新本节进度。

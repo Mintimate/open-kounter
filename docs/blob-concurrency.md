@@ -1,5 +1,7 @@
 # Blob 计数并发与恢复设计
 
+[返回首页](../README.md) · [维护与升级](maintenance.md) · [API 参考](api.md)
+
 ## 本轮决定
 
 继续使用 EdgeOne Cloud Functions 和 `@edgeone/pages-blob`，保留 `system/counters.json` 的 `2.1` 数据格式。读路径使用强一致模式；所有计数器修改仍通过 `_blobStore.js` 的统一锁入口执行。
